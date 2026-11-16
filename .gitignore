@@ -9,7 +9,9 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-# Virtual environments
+# Virtual environments and installed Node dependencies
+node_modules/
+.venv-*/
 .venv/
 venv/
 env/
@@ -25,6 +27,7 @@ Extended/.venv/
 config.advanced.yaml
 
 # Runtime artifacts
+local_runs/
 logs/
 Nado/logs/
 docs/

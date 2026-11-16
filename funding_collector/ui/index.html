@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Funding Collector · запуск стратегии</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div><span class="eyebrow">FUNDING COLLECTOR / DN</span><h1>Парная позиция</h1></div><span class="badge">Симуляция · реальные ордера отключены</span></header>
+<main>
+<section class="panel launch" aria-labelledby="launch-title"><div class="section-heading"><h2 id="launch-title">Запуск стратегии</h2><span class="muted">LIMIT → MARKET</span></div>
+<form id="intent-form">
+<input id="strategy_mode" type="hidden" value="DN_FULL_LIMIT_MARKET_V3">
+<div class="fields three">
+<label>Первая площадка<select id="primary_venue"><option value="core">Lighter Core</option><option value="rh">Lighter RH</option><option value="extended">Extended</option><option value="hyperliquid">Hyperliquid · native</option><option value="entropy">Entropy · HIP-3 io</option><option value="evedex">EVEDEX</option></select></label>
+<label>Площадка хеджа<select id="hedge_venue"><option value="rh">Lighter RH</option><option value="core">Lighter Core</option><option value="extended">Extended</option><option value="hyperliquid">Hyperliquid · native</option><option value="entropy">Entropy · HIP-3 io</option><option value="evedex">EVEDEX</option></select></label>
+<label>Направление первой ноги<select id="direction"><option value="long">Long · купить</option><option value="short">Short · продать</option></select></label>
+<label>Точный рынок · первая нога<input id="market" value="ETH" required maxlength="40" aria-describedby="mapping"></label>
+<label>Точный рынок · хедж<input id="hedge_market" value="ETH" required maxlength="40" aria-describedby="mapping"></label>
+<label>Объём · <span id="base-unit">ETH (base)</span><input id="quantity" value="0.02" required inputmode="decimal"></label>
+</div>
+<p id="mapping" class="hint">Core/RH: ETH · Extended: ETH-USD · Hyperliquid: ETH · Entropy: io:NVDA. Точные названия; единицы обеих ног проверяются при расчёте.</p>
+<details id="advanced"><summary>Комиссии и ограничения <span id="fee-state" class="muted">— комиссии не заданы</span></summary><div class="fields three advanced-fields">
+<label>Комиссия первой ноги · bps<input id="primary_fee_bps" required inputmode="decimal" placeholder="Укажите явно"></label>
+<label>Комиссия хеджа · bps<input id="hedge_fee_bps" required inputmode="decimal" placeholder="Укажите явно"></label>
+<label>Первая нога<select id="execution"><option value="post-only">Лимитная · post-only</option><option value="limit">Лимитная · возможен taker</option></select></label>
+<label>Лимит на ногу · USD<input id="max_notional_usd" value="100" required inputmode="decimal"></label>
+<label>Лимит затрат вход + выход · USD<input id="max_roundtrip_cost_usd" value="2" required inputmode="decimal"></label>
+<label>Срок расчёта · секунд<input id="max_book_age_seconds" value="30" required inputmode="decimal"></label>
+<label>Сценарий симуляции<select id="scenario"><option value="partial">Два исполнения → полный хедж</option><option value="timeout">Результат хеджа неизвестен</option><option value="reject">Хедж отклонён</option><option value="outage">Хедж недоступен</option><option value="reconnect">Сверка сохранённого журнала</option><option value="shutdown">Ошибка завершения</option></select></label>
+<label>ID операции<input id="intent_id" required maxlength="80" pattern="[A-Za-z0-9_-]+" autocomplete="off"></label>
+</div><p class="hint">Комиссии — ваши допущения, не тариф аккаунта (1 bps = 0,01%). Проскальзывание оценивается по глубине книги, не гарантируется. Лимит затрат — статический all-taker расчёт. Срок расчёта не ограничивает набор позиции.</p></details>
+<p class="risk-note">Сначала набираем всю первую ногу лимитками, затем хеджируем подтверждённый объём. До хеджа остаётся направленная позиция.</p>
+<button id="preview-button" type="submit">Рассчитать и проверить</button>
+</form>
+<div id="review" hidden aria-labelledby="review-title"><h3 id="review-title">Проверка перед запуском</h3><div id="preview"></div><label class="check"><input type="checkbox" id="acknowledge">Подтверждаю пустые локальные paper-аккаунты. Реальные позиции неизвестны.</label><div class="actions"><button id="paper-button" type="button" disabled>Запустить симуляцию</button><button id="edit-button" class="secondary" type="button">Изменить</button></div><p id="preview-age" class="hint" aria-live="polite"></p></div>
+<div id="message" role="status" aria-live="polite">Загрузка сохранённого состояния…</div>
+</section>
+<section class="panel" aria-labelledby="strategy-title"><div class="section-heading"><h2 id="strategy-title">Статус стратегии</h2><button id="refresh" class="secondary" type="button">Обновить</button></div><div id="strategy-empty"><strong>Ожидание</strong><p class="muted">Задайте пару и объём, затем проверьте расчёт.</p></div><div id="journal" aria-live="polite"></div></section>
+<details class="panel connections"><summary>Подключения и технические детали</summary><p class="hint">Аккаунты не подключены. Public-связь проверяется только явным запросом. СИНТЕТИЧЕСКИЕ исполнения — локальный журнал, не биржевые позиции. Нет потокового live-исполнения: симуляция возвращает готовый пакет событий.</p><div id="connector-status"></div><section id="live-worker-status" aria-live="polite"></section><section id="hyperliquid-status"></section><section id="entropy-status"></section><div class="actions"><button id="hyperliquid-preset" type="button" class="secondary">Пара Hyperliquid ETH / Core ETH</button><button id="entropy-preset" type="button" class="secondary">Пара Entropy io:NVDA / Core NVDA</button></div><div class="actions"><button id="hyperliquid-catalog-button" type="button" class="secondary">Каталог Hyperliquid</button><button id="entropy-catalog-button" type="button" class="secondary">Каталог Entropy</button></div><div id="hyperliquid-catalog"></div><div id="entropy-catalog"></div><div id="inventory-details"></div></details>
+</main><footer>Локальный paper · Книги публичные · Funding в расчёт затрат не включён</footer>
+</body></html>

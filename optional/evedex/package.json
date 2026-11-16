@@ -1,0 +1,8 @@
+{
+  "name": "funding-collector-evedex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {"test": "node --test bridge.test.cjs"},
+  "dependencies": {"@evedex/exchange-bot-sdk": "1.2.8", "axios": "1.13.2"},
+  "overrides": {"@evedex/exchange-api": "1.0.69", "@evedex/exchange-crypto": "1.0.17", "axios": "$axios"}
+}
