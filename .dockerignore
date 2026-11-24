@@ -1,0 +1,19 @@
+# Allowlist build context: no owner files, .git, legacy controller or local ledgers.
+**
+!funding_collector/
+!funding_collector/**
+!requirements-live-web.lock
+!deployment/
+!deployment/live-web/
+!deployment/live-web/Dockerfile
+**/__pycache__/
+**/*.pyc
+**/*.env
+**/.env
+**/key.json
+**/owner-auth.json
+**/*.sqlite3
+**/*.sqlite
+**/*.db
+**/local_runs/
+**/logs/
