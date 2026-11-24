@@ -34,7 +34,7 @@ def _binding(deployment, account, key_index, secret):
             checked=ExtendedCredentials(**asdict(secret))
             return Identity(deployment,account,checked.stark_public_key,key_index)
         key=bytes.fromhex(secret.removeprefix('0x'))
-        if deployment in ('hyperliquid-mainnet-native','entropy-mainnet-io') and len(key)==32:
+        if deployment in ('hyperliquid-mainnet-native','entropy-mainnet-io','aster-mainnet') and len(key)==32:
             from eth_account import Account
             signer=Account.from_key(key).address
         elif deployment in ('lighter-core-mainnet','lighter-rh-mainnet') and len(key)==40:

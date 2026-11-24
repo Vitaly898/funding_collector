@@ -104,7 +104,7 @@ def _child(conn, spec, factory, until, parent_pid, read_only=False):
                         result={k:result[k] for k in ('status','order_id','filled_base') if k in result}
                     elif method=='fills' and type(arg) in (int,str):
                         rows=await bridge.fills(arg)
-                        fee_currency='USD' if spec.identity.deployment=='extended-mainnet-starknet' else 'USDC'
+                        fee_currency={'extended-mainnet-starknet':'USD','aster-mainnet':'USDT'}.get(spec.identity.deployment,'USDC')
                         result=[dict(id=str(r['id']),quantity=str(number(r['quantity'],True)),price=str(number(r['price'],True)),
                                      fee=str(number(r['fee'])),fee_currency=fee_currency) for r in rows if r['fee_currency']==fee_currency]
                         if len(result)!=len(rows):raise Reject('unsupported fee')

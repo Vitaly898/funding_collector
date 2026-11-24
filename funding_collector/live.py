@@ -18,7 +18,8 @@ DEPLOYMENTS = {'hyperliquid-mainnet-native': ('https://api.hyperliquid.xyz', Non
                'entropy-mainnet-io': ('https://api.hyperliquid.xyz', None),
                'lighter-core-mainnet': ('https://mainnet.zklighter.elliot.ai', 304),
                'lighter-rh-mainnet': ('https://api.rh.lighter.xyz', 466324),
-               'extended-mainnet-starknet': ('https://api.starknet.extended.exchange', None)}
+               'extended-mainnet-starknet': ('https://api.starknet.extended.exchange', None),
+               'aster-mainnet': ('https://fapi.asterdex.com', 1666)}
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class Identity:
     def __post_init__(self):
         if self.deployment not in DEPLOYMENTS or not isinstance(self.signer,str) or not 1 <= len(self.signer) <= 128:
             raise Reject('unsupported deployment or signer identity')
-        if self.deployment in ('hyperliquid-mainnet-native','entropy-mainnet-io'):
+        if self.deployment in ('hyperliquid-mainnet-native','entropy-mainnet-io','aster-mainnet'):
             if (not all(re.fullmatch(r'0x[0-9a-fA-F]{40}', x) for x in (self.account,self.signer))
                     or self.account.lower()==self.signer.lower() or self.api_key_index is not None):
                 raise Reject('dedicated HL agent and separate account required')

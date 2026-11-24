@@ -66,8 +66,8 @@ def parser():
         sub.set_defaults(strategy_mode='DN_FULL_LIMIT_MARKET_V3')
         sub.add_argument('--store', default='local_runs/dn-v3')
         sub.add_argument('--intent-id', required=True)
-        sub.add_argument('--primary-venue', choices=('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid'), required=True)
-        sub.add_argument('--hedge-venue', choices=('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid'))
+        sub.add_argument('--primary-venue', choices=('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid', 'aster'), required=True)
+        sub.add_argument('--hedge-venue', choices=('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid', 'aster'))
         sub.add_argument('--hedge-market')
         sub.add_argument('--primary-fee-bps')
         sub.add_argument('--hedge-fee-bps')
@@ -95,7 +95,7 @@ def validate_values(values):
     if values.get('strategy_mode') is not None:
         paired = values.get('hedge_venue') is not None
         if (values['strategy_mode'] != 'DN_FULL_LIMIT_MARKET_V3'
-                or values.get('primary_venue') not in (('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid') if paired else ('core', 'rh'))
+                or values.get('primary_venue') not in (('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid', 'aster') if paired else ('core', 'rh'))
                 or values.get('direction') not in ('long', 'short')
                 or values.get('execution') not in ('post-only', 'limit')):
             raise Reject('invalid DN strategy/venue/direction/execution selection')
@@ -103,7 +103,7 @@ def validate_values(values):
             raise Reject('invalid exact instrument symbol')
         for key in ('quantity', 'max_notional_usd', 'max_roundtrip_cost_usd', 'max_book_age_seconds'):
             number(values[key], True)
-        if paired and (values['hedge_venue'] not in ('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid')
+        if paired and (values['hedge_venue'] not in ('core', 'rh', 'extended', 'entropy', 'evedex', 'hyperliquid', 'aster')
                        or values['hedge_venue'] == values['primary_venue']
                        or not re.fullmatch(r'(?:io:)?[A-Za-z0-9_.-]{1,30}', values.get('hedge_market', ''))
                        or any(values.get(k) is not None for k in ('core_fee_bps', 'rh_fee_bps'))):

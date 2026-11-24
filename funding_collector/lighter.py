@@ -76,4 +76,8 @@ def default_registry(artifacts):
     registry.register(Connection('hyperliquid', Deployment('hyperliquid-mainnet-native', 'hyperliquid'),
                                  'paper-hyperliquid', 'paper-hyperliquid'),
                       HyperliquidPublicAdapter(artifacts), Capabilities(public_market_data=True))
+    from .aster import AsterPublicAdapter
+    registry.register(Connection('aster', Deployment('aster-mainnet-v3', 'aster'),
+                                 'paper-aster', 'paper-aster'),
+                      AsterPublicAdapter(artifacts), Capabilities(public_market_data=True))
     return registry

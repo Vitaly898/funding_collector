@@ -63,6 +63,17 @@ class _ExtendedPrivate(ExtendedPrivate):
         await self.session.close()
 
 
+def aster_snapshot(public, spec):
+    """Canonical private base symbol with explicit Aster USDT wire symbol."""
+    from .aster import AsterInstrument
+    market,book,meta=public.snapshot(spec.symbol+'USDT')
+    if not isinstance(market,AsterInstrument) or market.raw['symbol']!=spec.symbol+'USDT':
+        raise Reject('Aster wire market mismatch')
+    market.symbol=market.base_asset
+    _scope(spec,market)
+    return market,book,meta
+
+
 def extended_snapshot(public, spec):
     """Exact reviewed base->wire mapping; retain the original settlement metadata."""
     from .extended import normalize_market
@@ -85,7 +96,7 @@ def _scope(spec, market):
 
 
 def sdk_factory(spec, secret, *, public_factory=None, exchange_factory=None, info_factory=None,
-                signer_factory=None, account_factory=None, http_session_factory=None):
+                signer_factory=None, account_factory=None, http_session_factory=None, aster_transport=None):
     """Default SignerSession factory; optional constructors are offline test seams.
 
     Only invoke inside the signer process in production. Returned authority is
@@ -147,6 +158,12 @@ def sdk_factory(spec, secret, *, public_factory=None, exchange_factory=None, inf
                 nonce_management_type=lighter.nonce_manager.NonceManagerType.NONE,chain_id=DEPLOYMENTS[identity.deployment][1])
             accounts=(account_factory or lighter.AccountApi)(signer.api_client)
             bridge=_CorePrivate(signer,accounts,identity,market,authority,spec.journal)
+        elif identity.deployment=='aster-mainnet':
+            from .aster import AsterPublicAdapter
+            from .live_aster import AsterPrivate
+            public=(public_factory or AsterPublicAdapter)(spec.artifacts)
+            market=aster_snapshot(public,spec)[0]
+            bridge=AsterPrivate(identity,secret,market,authority,spec.journal,transport=aster_transport)
         elif identity.deployment=='extended-mainnet-starknet':
             import aiohttp
             from .extended import ExtendedPublicAdapter
@@ -160,6 +177,7 @@ def sdk_factory(spec, secret, *, public_factory=None, exchange_factory=None, inf
         else:
             raise Reject('unsupported hydration')
         def snapshot():
+            if identity.deployment=='aster-mainnet':return aster_snapshot(public,spec)
             if identity.deployment=='extended-mainnet-starknet':return extended_snapshot(public,spec)
             return_value=public.snapshot(spec.symbol)
             _scope(spec,return_value[0])
