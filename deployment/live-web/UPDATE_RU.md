@@ -9,8 +9,14 @@
 В чистом доверенном клоне `~/apps/funding_collector` (оператор `qaagent`):
 
 ```bash
-python3 deployment/live-web/update.py ПОЛНЫЙ_40_СИМВОЛЬНЫЙ_SHA --repo ~/apps/funding_collector
+sudo -v && python3 deployment/live-web/update.py ПОЛНЫЙ_40_СИМВОЛЬНЫЙ_SHA --repo ~/apps/funding_collector --docker-sudo
 ```
+
+`sudo -v` запрашивает пароль в вашей консоли. Флаг `--docker-sudo` повышает
+права только отдельных Docker-команд; Git, файлы сборки и блокировка остаются
+принадлежащими `qaagent`. Без флага требуется уже настроенный доступ к Docker.
+Скрипт не запрашивает пароль скрытым subprocess: при истёкшем sudo-ticket Docker-команда
+завершится отказом. Перед обновлением используйте свежий `sudo -v`.
 
 `master`, сокращённый SHA, локальный неопубликованный commit и произвольный
 скачанный объект не принимаются. Ревизия должна быть **точным tip одной из

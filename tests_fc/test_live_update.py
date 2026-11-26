@@ -73,3 +73,22 @@ def test_confirmation_and_revision_validation(tmp_path):
     assert not f.calls
     with pytest.raises(ValueError):m.update(tmp_path,SHA,runner=f,confirm=lambda prompt:'no')
     assert not any(c[:2]==['docker','stop'] for c in f.calls)
+
+
+@pytest.mark.parametrize('sudo_enabled',[False,True])
+def test_cli_elevates_only_docker_not_git(tmp_path,monkeypatch,sudo_enabled):
+    import sys
+    m=module();calls=[]
+    monkeypatch.setenv('HOME',str(tmp_path))
+    monkeypatch.setattr(sys,'argv',[str(SCRIPT),SHA,'--repo',str(tmp_path)]+(['--docker-sudo'] if sudo_enabled else []))
+    monkeypatch.setattr(m.signal,'signal',lambda *args:None)
+    monkeypatch.setattr(m,'command',lambda argv,**kwargs:calls.append((argv,kwargs)) or '')
+    def fake_update(repo,sha,*,runner):
+        assert repo==tmp_path and sha==SHA
+        runner(['git','status','--porcelain'],cwd=repo)
+        runner(['docker','version'],cwd=repo)
+    monkeypatch.setattr(m,'update',fake_update)
+    assert m.main()==0
+    assert calls[0][0]==['git','status','--porcelain']
+    assert calls[1][0]==(['sudo','-n','--'] if sudo_enabled else [])+['docker','version']
+    assert all(kwargs['cwd']==tmp_path for _,kwargs in calls)

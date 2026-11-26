@@ -103,13 +103,17 @@ def update(repo, sha, *, runner=command, confirm=input):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('sha');p.add_argument('--repo',type=Path,default=Path.home()/'apps/funding_collector');args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('sha');p.add_argument('--repo',type=Path,default=Path.home()/'apps/funding_collector');p.add_argument('--docker-sudo',action='store_true',help='Use sudo only for Docker commands; Git/build checkout remain owned by the operator');args=p.parse_args()
+    def operator_command(argv, **kwargs):
+        if args.docker_sudo and argv[0]=='docker':
+            argv=['sudo','-n','--',*argv]
+        return command(argv,**kwargs)
     lock=Path.home()/'.funding-live-update.lock'
     with lock.open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
         def interrupted(*_):raise InterruptedError('update interrupted')
         signal.signal(signal.SIGTERM,interrupted)
-        try:update(args.repo,args.sha)
+        try:update(args.repo,args.sha,runner=operator_command)
         except (Exception,KeyboardInterrupt) as exc:
             print(type(exc).__name__+': update refused/failed; no data initialization performed.');return 1
     return 0
