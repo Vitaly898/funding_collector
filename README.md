@@ -1,5 +1,33 @@
 # funding_collector — локальный DN hedge executor
 
+## Браузерный LIVE-прототип для VPS
+
+Новый отдельный web-live путь: защищённый вход владельца → конфигурация двух ног →
+зашифрованные dedicated execution keys → read-only account-check → fresh ARM →
+существующий isolated signer/worker → подтверждённые fills и журнал.
+Это **не** прежний paper UI из команды `funding_collector serve` ниже.
+
+Локальный запуск web-live (Linux, отдельное окружение):
+
+```sh
+python3.13 -m venv .venv-live-web
+.venv-live-web/bin/pip install -r requirements-live-web.lock
+.venv-live-web/bin/pip check
+.venv-live-web/bin/python -m funding_collector.live_web init --root "$HOME/.local/share/funding-collector/web-live"
+.venv-live-web/bin/python -m funding_collector.live_web serve --root "$HOME/.local/share/funding-collector/web-live" --port 8765
+```
+
+Первый `init` запрашивает пароль владельца через masked terminal prompt; ключи затем
+настраиваются в авторизованном браузере. Для VPS обязателен HTTPS через отдельный
+Caddy proxy; 8765 не публикуется. Подробности, ограничения и Docker Compose:
+**[deployment/live-web/README.md](deployment/live-web/README.md)**.
+
+Офлайн-контракты и synthetic browser acceptance не подтверждают реальную биржевую
+регистрацию/ордера. Docker image build, реальный TLS/VPS и реальные account/order
+acceptance проверяются отдельно. Нет автоматического cancel/flatten: logout и expiry
+закрывают authority, но позиции и ордера могут остаться на биржах.
+
+
 ## Быстрый локальный запуск UI (без ключей)
 
 Из корня клонированного репозитория на Linux:
@@ -12,7 +40,7 @@ python3 -m funding_collector serve --store local_runs/ui-paper --host 127.0.0.1 
 
 ## Текущий статус
 
-- Web UI: public market data и paper-исполнение; реальные ордера через браузер не отправляются.
+- Прежний paper UI (`funding_collector serve`): public market data и synthetic исполнение. Новый отдельный `funding_collector.live_web` предоставляет явно вооружаемый браузерный LIVE-путь; он описан выше.
 - Отдельный локальный терминальный `live`-контур: Core, RH, native Hyperliquid, Entropy, Extended и Aster. Проверен офлайн с dummy-ключами и подменёнными транспортами; это **не допуск к реальным средствам**.
 - Режим: полный набор primary LIMIT → один opposite protected IOC по подтверждённому base quantity → сверка fills и остатка. IOC не гарантирует полный fill. Автоматических повторных hedge/flatten нет.
 - Entropy: отдельные identity/agent credentials; reviewed private pair только `io:NVDA` против Core/RH `NVDA`. Не любые рынки HIP-3.

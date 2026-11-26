@@ -1,0 +1,10 @@
+{
+    admin off
+}
+
+{$FC_DOMAIN} {
+    # Automatic HTTPS; preserve the original Host for the application's exact-origin guard.
+    reverse_proxy 127.0.0.1:8765
+    header Strict-Transport-Security "max-age=31536000"
+    # No access log: never add request bodies or authentication headers to logs.
+}

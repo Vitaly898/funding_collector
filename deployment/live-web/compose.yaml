@@ -1,0 +1,65 @@
+name: funding-live-web
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deployment/live-web/Dockerfile
+    image: funding-collector-live-web:local
+    user: "10001:10001"
+    entrypoint: ["python", "-m", "funding_collector.live_web"]
+    command: ["serve", "--root", "/data", "--host", "127.0.0.1", "--port", "8765", "--origin", "https://${FC_DOMAIN:?Set FC_DOMAIN to the application DNS hostname}"]
+    environment:
+      FC_DOMAIN: "${FC_DOMAIN:?Set FC_DOMAIN}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - app_data:/data
+    # Caddy shares this network namespace; the authenticated backend remains loopback-only.
+    ports:
+      - "80:80"
+      - "443:443"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1.0
+    ulimits:
+      core: 0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request; r=urllib.request.Request('http://127.0.0.1:8765/api/health',headers={'Host':os.environ['FC_DOMAIN']}); urllib.request.urlopen(r,timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  caddy:
+    image: caddy:2.10.2-alpine
+    network_mode: service:app
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      FC_DOMAIN: "${FC_DOMAIN:?Set FC_DOMAIN}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+    stop_grace_period: 10s
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:
