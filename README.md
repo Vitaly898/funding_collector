@@ -13,7 +13,7 @@ python3 -m funding_collector serve --store local_runs/ui-paper --host 127.0.0.1 
 ## Текущий статус
 
 - Web UI: public market data и paper-исполнение; реальные ордера через браузер не отправляются.
-- Отдельный локальный терминальный `live`-контур: Core, RH, native Hyperliquid, Entropy и Extended. Проверен офлайн с dummy-ключами и подменёнными транспортами; это **не допуск к реальным средствам**.
+- Отдельный локальный терминальный `live`-контур: Core, RH, native Hyperliquid, Entropy, Extended и Aster. Проверен офлайн с dummy-ключами и подменёнными транспортами; это **не допуск к реальным средствам**.
 - Режим: полный набор primary LIMIT → один opposite protected IOC по подтверждённому base quantity → сверка fills и остатка. IOC не гарантирует полный fill. Автоматических повторных hedge/flatten нет.
 - Entropy: отдельные identity/agent credentials; reviewed private pair только `io:NVDA` против Core/RH `NVDA`. Не любые рынки HIP-3.
 - Extended: явный `fee_rate_cap` в public config; комиссии USD отдельно от USDC. Зависимости `requirements-extended.lock` устанавливаются в отдельное окружение; основная native/Core среда не содержит всех Extended SDK.
@@ -30,6 +30,39 @@ python3 -m funding_collector serve --store local_runs/ui-paper --host 127.0.0.1 
 > Это не live-допуск. Установка, безопасный onboarding и оставшиеся ограничения:
 > [LOCAL_TEST_WALLET.md](LOCAL_TEST_WALLET.md), зависимости —
 > `requirements-live-native-core.lock`. В UI приватные ключи и live ARM не доступны.
+
+## Aster Futures V3
+
+В UI/CLI площадка `aster` использует точные символы `BTCUSDT`, `ETHUSDT`, `SOLUSDT`;
+публичный стакан и mark price читаются без ключей. Paper fills остаются синтетическими.
+Variational не добавлен в новый public/paper/private путь: наличие legacy adapter
+не означает готовую интеграцию.
+
+Для отдельного терминального `live` используются существующие encrypted custody,
+signer child, factory и общий worker. Установите `requirements-live-native-core.lock`
+в отдельный venv; он содержит `eth-account` для V3 EIP-712 подписи. Протокол проверен
+по официальному [aster-finance API](https://github.com/asterdex/api-docs), ревизия
+`f3d1c073f63c90d54766e0317e10627ce8031a38`; реальный private API пока не проверен.
+
+Отличия Aster в публичной конфигурации из [LOCAL_TEST_WALLET.md](LOCAL_TEST_WALLET.md):
+- deployment: `aster-mainnet`; `account` — owner/account address, `signer` — адрес
+  **отдельного** зарегистрированного agent signer, `api_key_index: null`;
+- private `symbol`: `BTC`, `ETH` или `SOL`; локальные reviewed `asset_id`: 0, 1, 2
+  соответственно — **не биржевые asset IDs**; wire-symbol сохраняется отдельно;
+- секрет — private key только dedicated agent, не основного кошелька; ввод только
+  в masked terminal prompt. Agent permissions на бирже могут быть шире локальных;
+- нужен уже настроенный one-way mode и разрешённый `canTrade`. `registration()`
+  только читает состояние и ничего не регистрирует/не меняет на бирже;
+- primary — post-only `LIMIT GTX`, hedge — защищённый ценой `LIMIT IOC`.
+  ACK не подтверждает fill; fills сверяются отдельно, комиссии — `USDT`,
+  без неявного сложения с `USDC`/`USD`;
+- USDT collateral/settlement не равны USDC: общая USD-оценка индикативна,
+  stablecoin parity не гарантируется;
+- один workload на dedicated signer/journal. UNKNOWN блокирует новые отправки,
+  нет автоматического retry, cancel, flatten, transfers или настройки аккаунта;
+- public smoke не доказывает доступность аккаунта, права agent, принятие ордера или
+  fills. Реальные read-only проверки и минимальные сделки требуют отдельного
+  согласования; публикация кода не является разрешением на торговлю.
 
 ## Hyperliquid и Entropy — отдельные подключения
 

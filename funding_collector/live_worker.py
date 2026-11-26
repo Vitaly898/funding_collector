@@ -132,7 +132,7 @@ class Worker:
         fills=await venue.fills(oid)
         seen=set();total=Decimal(0)
         for f in fills:
-            expected_currency='USD' if venue.identity.deployment=='extended-mainnet-starknet' else 'USDC'
+            expected_currency={'extended-mainnet-starknet':'USD','aster-mainnet':'USDT'}.get(venue.identity.deployment,'USDC')
             if f['id'] in seen or f['fee_currency']!=expected_currency:raise Reject('invalid fee/fill identity')
             seen.add(f['id']);total+=number(f['quantity'],True)
             number(f['price'],True);number(f['fee'])

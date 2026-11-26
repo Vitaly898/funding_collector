@@ -88,7 +88,7 @@ def status(root):
             if s.get('phase') not in {'BASELINE','PRIMARY_PENDING','HEDGE_PENDING','COMPLETE'}:raise Reject('invalid worker phase')
             row={k:s[k] for k in ('status','phase')}
             row.update({k:str(number(s[k])) for k in ('primary_filled','hedge_filled','residual_base','fees_usdc')})
-            row['fees_by_currency']={k:str(number(v)) for k,v in s.get('fees_by_currency',{'USDC':s['fees_usdc']}).items() if k in ('USD','USDC')}
+            row['fees_by_currency']={k:str(number(v)) for k,v in s.get('fees_by_currency',{'USDC':s['fees_usdc']}).items() if k in ('USD','USDC','USDT')}
             row['event_count']=len(s['journal']);row['possible_open_orders_or_unobserved_fills']=s['phase']!='COMPLETE'
             result['tasks'].append(row)
     finally:db.close()
@@ -117,6 +117,10 @@ def public_snapshot(spec):
         from .extended import ExtendedPublicAdapter
         from .signer_factory import extended_snapshot
         return extended_snapshot(ExtendedPublicAdapter(spec.artifacts),spec)
+    elif spec.identity.deployment=='aster-mainnet':
+        from .aster import AsterPublicAdapter
+        from .signer_factory import aster_snapshot
+        return aster_snapshot(AsterPublicAdapter(spec.artifacts),spec)
     else:
         from .lighter import LighterPublicAdapter
         adapter=LighterPublicAdapter('rh' if spec.identity.deployment=='lighter-rh-mainnet' else 'core',spec.artifacts)

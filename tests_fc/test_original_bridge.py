@@ -129,12 +129,12 @@ class OriginalBridge(unittest.TestCase):
         from funding_collector.original_dn import connector_status
         with patch('importlib.import_module', side_effect=AssertionError('no imports')):
             rows = connector_status()
-        self.assertEqual({r['id'] for r in rows}, {'extended', 'nado', 'variational', 'core', 'rh'})
+        self.assertEqual({r['id'] for r in rows}, {'extended', 'nado', 'variational', 'core', 'rh', 'aster'})
         for row in rows:
             self.assertFalse(row['live_ready'])
             self.assertFalse(row['account_checked'])
             self.assertTrue(row['blockers'])
-        self.assertEqual({r['id'] for r in rows if r['paper_selectable']}, {'core', 'rh', 'extended'})
+        self.assertEqual({r['id'] for r in rows if r['paper_selectable']}, {'core', 'rh', 'extended', 'aster'})
 
 
 if __name__ == '__main__':

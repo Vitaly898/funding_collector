@@ -45,6 +45,10 @@ def connector_status():
                          missing_dependencies=[], dependency_check='stdlib public only',
                          live_ready=False, account_checked=False, paper_selectable=True,
                          blockers=['Только public GET + paper; private signer/fill reconciliation отсутствует']))
+    rows.append(dict(id='aster', implementation='funding_collector.aster.AsterPublicAdapter',
+        missing_dependencies=[], dependency_check='stdlib public; private eth-account optional',
+        live_ready=False, account_checked=False, paper_selectable=True,
+        blockers=['Private account acceptance unverified; explicit local setup/check/arm required']))
     return rows
 
 

@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const fields = ['strategy_mode','primary_venue','direction','market','quantity','execution','hedge_venue','hedge_market','primary_fee_bps','hedge_fee_bps','max_notional_usd','max_roundtrip_cost_usd','max_book_age_seconds','scenario'];
 let token = '', draft = null, busy = false, submitted = false;
-const names = {core:'Lighter Core',rh:'Lighter RH',extended:'Extended',hyperliquid:'Hyperliquid native',entropy:'Entropy io',evedex:'EVEDEX'};
+const names = {core:'Lighter Core',rh:'Lighter RH',extended:'Extended',hyperliquid:'Hyperliquid native',entropy:'Entropy io',evedex:'EVEDEX',aster:'Aster Futures V3'};
 function node(tag, text, className) { const n = document.createElement(tag); if (text !== undefined) n.textContent = String(text); if (className) n.className = className; return n; }
 function decimalParts(value) {const s=String(value ?? '0'); if(!/^-?\d+(\.\d+)?$/.test(s)) throw new Error('Некорректный объём в сохранённом состоянии'); const digits=(s.split('.')[1]||'').length; return [BigInt(s.replace('.','')),digits];}
 function decimalAdd(a,b) {const [x,p]=decimalParts(a),[y,q]=decimalParts(b),n=Math.max(p,q);const result=x*10n**BigInt(n-p)+y*10n**BigInt(n-q);const sign=result<0n?'-':'';const raw=(result<0n?-result:result).toString().padStart(n+1,'0');return sign+(n?(raw.slice(0,-n)+'.'+raw.slice(-n)).replace(/\.?0+$/,''):raw);}
