@@ -134,6 +134,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,dict(authenticated=False,csrf_token='',configured=True))
         if self.command=='GET' and path=='/api/live/status':return self.reply(200,s.service.status())
         operations={
+            '/api/live/markets':('markets',{'primary','hedge'}),
+            '/api/live/quote':('quote',{'primary','hedge','primary_symbol','hedge_symbol','side','offset_pct','protection_bps'}),
             '/api/live/configure':('configure',{'config'}),
             '/api/live/setup':('setup',{'leg','secret','passphrase'}),
             '/api/live/check':('check',{'passphrases'}),

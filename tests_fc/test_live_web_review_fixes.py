@@ -10,11 +10,21 @@ from funding_collector.live_web_service import LiveService
 from funding_collector.web_auth import Sessions
 
 
+def offline_config(**overrides):
+    """Lifecycle doubles retain the public strategy projection contract."""
+    values = dict(lifetime=30, poll_seconds=.01,
+                  intent={'id':'offline', 'side':'buy', 'quantity':'0.02'},
+                  specs=[SimpleNamespace(identity=SimpleNamespace(deployment=d), symbol='ETH')
+                         for d in ('hyperliquid-mainnet-native', 'lighter-core-mainnet')])
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 @pytest.mark.parametrize('expiry', [False, True], ids=['logout', 'expiry'])
 def test_open_does_not_invert_session_and_metadata_locks(tmp_path, monkeypatch, expiry):
     from funding_collector import supervised
     service = LiveService(tmp_path/'private')
-    service._config = SimpleNamespace(lifetime=30)
+    service._config = offline_config()
     auth = Sessions(service.stop)
     token, _ = auth.issue()
     epoch = service._epoch
@@ -66,7 +76,7 @@ def test_open_does_not_invert_session_and_metadata_locks(tmp_path, monkeypatch, 
 def test_stop_during_session_creation_disposes_unregistered_legs(tmp_path, monkeypatch):
     from funding_collector import supervised
     service = LiveService(tmp_path/'private')
-    service._config = SimpleNamespace(lifetime=30)
+    service._config = offline_config()
     epoch = service._epoch
     legs = [SimpleNamespace(vault=SimpleNamespace(lock=Mock()), close=Mock(),
                             unlock_readonly=Mock()) for _ in range(2)]
@@ -88,7 +98,7 @@ def test_stop_during_session_creation_disposes_unregistered_legs(tmp_path, monke
 
 def test_failed_close_still_disposes_both_legs_and_releases_operation(tmp_path, monkeypatch):
     service = LiveService(tmp_path/'private')
-    service._config = SimpleNamespace()
+    service._config = offline_config()
     legs = [SimpleNamespace(vault=SimpleNamespace(lock=Mock()), close=Mock(side_effect=RuntimeError()))
             for _ in range(2)]
     def fail_open(*a):
@@ -108,7 +118,7 @@ def test_failed_close_still_disposes_both_legs_and_releases_operation(tmp_path, 
 def timer_lifecycle(tmp_path, monkeypatch):
     from funding_collector import live_worker, supervised
     service = LiveService(tmp_path/'private')
-    service._config = SimpleNamespace(lifetime=30, poll_seconds=.01, intent={'id': 'offline'})
+    service._config = offline_config()
     timers = []
     legs = [SimpleNamespace(vault=SimpleNamespace(lock=Mock()), close=Mock(),
                             unlock=Mock(), alive=True) for _ in range(2)]
@@ -135,7 +145,7 @@ def timer_lifecycle(tmp_path, monkeypatch):
         def add(self, *args): pass
         def arm(self, *args, **kwargs): pass
         async def tick(self, *args):
-            return dict(status='RUNNING', phase='PRIMARY', intent={'id': 'offline'},
+            return dict(status='RUNNING', phase='PRIMARY', intent={'id': 'offline', 'side':'buy', 'quantity':'0.02'},
                         primary_filled='0', hedge_filled='0', residual_base='0',
                         fills={'primary': [], 'hedge': []}, journal=[])
     monkeypatch.setattr(threading, 'Timer', Timer)
@@ -233,7 +243,7 @@ def test_extended_setup_decodes_exact_decimal_vault(tmp_path, monkeypatch, vault
     monkeypatch.setattr(KeyStore, 'create', create)
     service = LiveService(tmp_path/'private')
     identity = SimpleNamespace(deployment='extended-mainnet-starknet')
-    service._config = SimpleNamespace(specs=[SimpleNamespace(identity=identity)])
+    service._config = offline_config(specs=[SimpleNamespace(identity=identity, symbol='ETH')])
     secret = dict(api_key='synthetic', stark_private_key='0x1', stark_public_key='0x2', vault=vault)
     try:
         service.setup(0, secret, 'offline-passphrase')
@@ -252,7 +262,7 @@ def test_extended_setup_rejects_invalid_vault_before_writing(tmp_path, monkeypat
     monkeypatch.setattr(KeyStore, 'create', create)
     service = LiveService(tmp_path/'private')
     identity = SimpleNamespace(deployment='extended-mainnet-starknet')
-    service._config = SimpleNamespace(specs=[SimpleNamespace(identity=identity)])
+    service._config = offline_config(specs=[SimpleNamespace(identity=identity, symbol='ETH')])
     secret = dict(api_key='synthetic', stark_private_key='0x1', stark_public_key='0x2', vault=vault)
     try:
         with pytest.raises(Reject):
@@ -272,7 +282,7 @@ def test_restart_preserves_durable_observation_time(tmp_path, monkeypatch, journ
     service = LiveService(root)
     service.close()
     (root/'worker').mkdir()
-    state = dict(status='UNKNOWN', phase='PRIMARY', intent={'id':'offline'},
+    state = dict(status='UNKNOWN', phase='PRIMARY', intent={'id':'offline', 'side':'buy', 'quantity':'0.02'},
                  primary_filled='0', hedge_filled='0', residual_base='0',
                  fills={'primary':[], 'hedge':[]}, journal=journal)
     with sqlite3.connect(root/'worker'/'orders.sqlite3') as db:

@@ -108,6 +108,9 @@ def _child(conn, spec, factory, until, parent_pid, read_only=False):
                         result=[dict(id=str(r['id']),quantity=str(number(r['quantity'],True)),price=str(number(r['price'],True)),
                                      fee=str(number(r['fee'])),fee_currency=fee_currency) for r in rows if r['fee_currency']==fee_currency]
                         if len(result)!=len(rows):raise Reject('unsupported fee')
+                        for source,fill in zip(rows,result):
+                            if source.get('executed_at') is not None:
+                                fill['executed_at']=str(number(source['executed_at'],True))
                     else:raise Reject('operation not allowlisted')
                     _send(conn,dict(ok=True,result=result))
                 except Exception:

@@ -64,6 +64,8 @@ class HyperliquidPrivate:
                     raise Reject('fill market/fee currency mismatch')
                 out.append(dict(id=str(r['tid']),quantity=str(number(r['sz'],True)),
                                 price=str(number(r['px'],True)),fee=str(number(r['fee'])),fee_currency='USDC'))
+                if type(r.get('time')) is int and r['time']>0:
+                    out[-1]['executed_at']=str(number(r['time'])/1000)
         if len({r['id'] for r in out})!=len(out):raise Reject('duplicate fill ids')
         return out
 

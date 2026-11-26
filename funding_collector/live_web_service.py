@@ -14,6 +14,29 @@ from .domain import Reject
 WARNING = 'possible_remaining_exposure: lock does not cancel orders or flatten positions'
 
 
+def strategy_analytics(state):
+    """Fill-weighted prices/exposure, never estimated live P&L or zero fees."""
+    from decimal import Decimal
+    from .domain import number
+    result={}
+    for label in ('primary','hedge'):
+        rows=state.get('fills',{}).get(label,[])
+        quantity=sum((number(r['quantity'],True) for r in rows),Decimal(0))
+        notional=sum((number(r['quantity'],True)*number(r['price'],True) for r in rows),Decimal(0))
+        fees={}
+        for r in rows:
+            currency=r['fee_currency']
+            fees[currency]=fees.get(currency,Decimal(0))+number(r['fee'])
+        sign=1 if state['intent']['side']=='buy' else -1
+        if label=='hedge':sign=-sign
+        result[label]=dict(quantity=str(quantity),signed_base=str(quantity*sign if quantity else Decimal(0)),
+            average_price=str(notional/quantity) if quantity else None,
+            fees_by_currency={k:str(v) for k,v in fees.items()} if rows else None,
+            realized_pnl=None,unrealized_pnl=None,funding=None,mark=None,
+            reason='Нет подтверждённых close fills и свежего mark; funding не включён')
+    return result
+
+
 class LiveService:
     def __init__(self, root, *, session_factory=None, public_reader=None):
         self._root = Path(os.path.abspath(root))
@@ -68,7 +91,8 @@ class LiveService:
         from .domain import number
         result={k:s[k] for k in ('status','phase','intent','primary_filled','hedge_filled','residual_base')}
         result['fees_by_currency']={k:str(number(v)) for k,v in s.get('fees_by_currency',{}).items() if k in ('USD','USDC','USDT')}
-        result['fills']={label:[{k:r[k] for k in ('id','quantity','price','fee','fee_currency')} for r in s['fills'][label]] for label in ('primary','hedge')}
+        result['fills']={label:[dict({k:r[k] for k in ('id','quantity','price','fee','fee_currency')},executed_at=r.get('executed_at')) for r in s['fills'][label]] for label in ('primary','hedge')}
+        result['analytics']=strategy_analytics(s)
         result['journal']=[{k:e[k] for k in ('sequence','event','at')} for e in s['journal']]
         if loaded:
             result['observed_at']=s['journal'][-1]['at'] if s['journal'] else None
@@ -128,6 +152,18 @@ class LiveService:
             except Exception:raise Reject('invalid_config') from None
             finally:path.unlink(missing_ok=True)
             return self.status()
+
+    def markets(self, primary, hedge):
+        self._ensure_open()
+        from .live_markets import MarketDirectory
+        return MarketDirectory(self._root/'market-directory').catalog(primary,hedge)
+
+    def quote(self, primary, hedge, primary_symbol, hedge_symbol, side, offset_pct, protection_bps):
+        self._ensure_open()
+        from .live_markets import MarketDirectory
+        return MarketDirectory(self._root/'market-directory').quote(primary,hedge,
+            primary_symbol=primary_symbol,hedge_symbol=hedge_symbol,
+            side=side,offset_pct=offset_pct,protection_bps=protection_bps)
 
     def _begin(self):
         if not self._operation.acquire(blocking=False):raise Reject('operation_busy')
@@ -296,9 +332,19 @@ class LiveService:
                     self._running=False;self._enabled=False
             ready.set()
 
+    def _strategies(self):
+        # Current engine owns one persisted config / exclusive worker root.
+        if self._config is None:return []
+        state=self._state
+        return [dict(id=self._config.intent['id'],intent=dict(self._config.intent),
+            status=state['status'] if state else 'CONFIGURED',
+            legs=[dict(deployment=s.identity.deployment,symbol=s.symbol) for s in self._config.specs],
+            analytics=state['analytics'] if state else strategy_analytics(dict(intent=self._config.intent)),
+            observed_at=state.get('observed_at') if state else None)]
+
     def status(self):
         with self._meta:
-            return dict(mode='LIVE', configured=self._config is not None,
+            return dict(mode='LIVE', strategies=self._strategies(), configured=self._config is not None,
                         vaults=[dict(configured=(self._root / f'vault-{n}' / 'key.json').is_file()) for n in range(2)],
                         running=self._running, trading_enabled=self._enabled,
                         checked=self._checked, state=self._state, warning=WARNING,
