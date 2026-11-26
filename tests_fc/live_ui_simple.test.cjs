@@ -19,6 +19,6 @@ test('volume farming is a collapsed disabled placeholder outside execution form'
  const block=html.match(/<details id="volume-farming"[\s\S]*?<\/details>/)?.[0];
  assert.ok(block,'placeholder exists');assert.ok(!block.split('>')[0].includes('open'));
  assert.match(block,/fieldset disabled/);assert.match(block,/пока недоступно/);
- assert.match(block,/Auto-close/);assert.match(block,/Infinite loop/);assert.match(block,/Min \/ max delay/);
+ assert.match(block,/Автозакрытие/);assert.match(block,/Бесконечный цикл/);assert.match(block,/Мин. \/ макс. задержка/);
  assert.ok(!/<(?:input|select)[^>]*\bname=/.test(block));
 });

@@ -67,7 +67,10 @@ function buildSimpleConfig(common,identities,quote){
  const legs=quote.legs.map((leg,n)=>({identity:identities[n],symbol:leg.symbol,asset_id:leg.asset_id,max_quantity:common.quantity,max_notional:common.max_notional,max_slippage_bps:common.max_slippage_bps}));
  return {version:1,legs,intent:{id:common.id,quantity:common.quantity,side:common.side,primary_price:quote.legs[0].price,hedge_price:quote.legs[1].price,primary_reference:quote.legs[0].reference,hedge_reference:quote.legs[1].reference},lifetime:Number(common.lifetime),poll_seconds:Number(common.poll_seconds)};
 }
-if(typeof module!=='undefined'&&module.exports)module.exports={createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig};
+function statusText(value){return ({NEW:'Готова к запуску',RUNNING:'Исполняется',UNKNOWN:'Результат неизвестен — нужна сверка',ATTENTION:'Требуется ручная сверка',COMPLETED_CONFIRMED:'Исполнено',CONFIGURED:'Настроена'})[value]||'Ожидает запуска';}
+function strategyName(id){const name=String(id||'').replace(/-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,'');return !name||name==='dn'?'Ручная стратегия':name;}
+function eventText(value){return ({created:'Стратегия сохранена',reconciled_flat_baseline:'Проверены позиции и открытые заявки',reconciled_before_hedge:'Первый объём подтверждён; проверена вторая биржа',write_ahead_primary:'Подготовлена заявка на первой бирже',write_ahead_hedge:'Подготовлена встречная заявка на второй бирже',primary_ack_not_fill:'Первая биржа ответила на заявку — это ещё не сделка',hedge_ack_not_fill:'Вторая биржа ответила на заявку — это ещё не сделка',primary_confirmed_trades:'Подтверждены сделки на первой бирже',hedge_confirmed_trades:'Подтверждены сделки на второй бирже',unknown_primary:'Результат первой заявки неизвестен; повтор запрещён',unknown_hedge:'Результат второй заявки неизвестен; повтор запрещён',failure_requires_attention:'Исполнение остановлено: нужна ручная сверка',completed_confirmed_positions_remain_open:'Обе ноги исполнены; позиции остаются открытыми'})[value]||'Состояние обновлено';}
+if(typeof module!=='undefined'&&module.exports)module.exports={createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig,statusText,eventText,strategyName};
 if(typeof document==='undefined')return;
 const $=id=>document.getElementById(id);
 const sensitive=()=>document.querySelectorAll('input[type=password]');
@@ -76,11 +79,11 @@ let timer=null,uiEpoch=0;
 function gate(auth){
  uiEpoch++;clearSecrets();$('login-panel').hidden=auth;$('workspace').hidden=!auth;$('logout').hidden=!auth;
  clearTimeout(timer);
- if(!auth){$('strategy-modal').close();$('strategy-list').replaceChildren();cardsSignature='';$('strategy-detail').hidden=true;$('strategies').hidden=false;invalidate(true);$('ledger').replaceChildren();$('accounts').replaceChildren();$('summary').textContent='Исполнение заблокировано';$('message').textContent='';}
+ if(!auth){$('strategy-modal').close();$('strategy-list').replaceChildren();cardsSignature='';$('strategy-detail').hidden=true;$('strategies').hidden=false;invalidate(true);$('ledger').replaceChildren();$('raw-state').textContent='';$('accounts').replaceChildren();$('summary').textContent='Исполнение заблокировано';$('message').textContent='';}
 }
 const client=createClient({onAuth:gate});
 const venues=[['hyperliquid-mainnet-native','Hyperliquid · native'],['lighter-core-mainnet','Lighter · Core'],['lighter-rh-mainnet','Lighter · RH'],['entropy-mainnet-io','Entropy · io']];
-const fields=[['account','Аккаунт / owner address'],['signer','Выделенный signer / public key'],['api_key_index','API key index · только Lighter']];
+const fields=[['account','Адрес аккаунта'],['signer','Публичный ключ торгового подписанта'],['api_key_index','Номер API-ключа · только Lighter']];
 function input(label,name,{password=false,required=true,value=''}={}){
  const wrap=document.createElement('label');wrap.textContent=label;
  const el=document.createElement('input');el.name=name;el.type=password?'password':'text';el.required=required;el.value=value;
@@ -93,7 +96,7 @@ function invalidate(markets=false){
  if(markets){marketRows=[[],[]];for(let n=0;n<2;n++){$('pair-select-'+n).replaceChildren(new Option('Загрузите рынки',''));$('instrument-'+n).textContent='Инструмент не выбран.';}$('market-status').textContent='Выбор бирж изменён. Обновите рынки.';}
 }
 const deploymentPair=()=>({primary:$('primary-deployment').value,hedge:$('hedge-deployment').value});
-function instrumentSummary(n){const row=marketRows[n].find(r=>r.symbol===$('pair-select-'+n).value);$('instrument-'+n).textContent=row?row.label+' · base '+row.base+' · '+row.units:'Инструмент не выбран.';}
+function instrumentSummary(n){const row=marketRows[n].find(r=>r.symbol===$('pair-select-'+n).value);$('instrument-'+n).textContent=row?row.label+' · базовый актив '+row.base+' · '+row.units:'Инструмент не выбран.';}
 function pairOptions(n){
  const select=$('pair-select-'+n),selected=select.value,search=$('pair-search-'+n).value.trim().toUpperCase();
  select.replaceChildren(new Option('Выберите инструмент этой биржи',''));
@@ -112,8 +115,8 @@ for(let n=0;n<2;n++){
  const title=document.createElement('p');title.className='connection-venue';box.append(title);
  fields.forEach(([name,label])=>box.append(input(label,name,{required:name!=='api_key_index'})));
  const setup=$('setup-'+n);
- setup.append(input('Выделенный execution key · не owner-wallet key','secret',{password:true}));
- setup.append(input('Новая локальная passphrase · минимум 16 символов','passphrase',{password:true}));
+ setup.append(input('Выделенный торговый ключ · не ключ основного кошелька','secret',{password:true}));
+ setup.append(input('Новый пароль шифрования ключа · минимум 16 символов','passphrase',{password:true}));
  const button=document.createElement('button');button.type='submit';button.textContent='Зашифровать ключ';setup.append(button);
  function conditional(){
   title.textContent=select.selectedOptions[0].textContent;
@@ -141,45 +144,46 @@ function renderStrategies(row){
  if(!rows.length){out.textContent='Стратегий пока нет. Соберите первую стратегию.';return;}
  rows.forEach(strategy=>{
   const card=document.createElement('article');card.className='strategy-card';
-  const title=document.createElement('h2');title.textContent=strategy.id;card.append(title);
+  const title=document.createElement('h2');title.textContent=strategyName(strategy.id);card.append(title);
   const markets=document.createElement('p');markets.textContent=strategy.legs.map(l=>(venues.find(v=>v[0]===l.deployment)?.[1]||l.deployment)+' · '+l.symbol).join(' ↔ ');card.append(markets);
-  const state=document.createElement('p');state.textContent=strategy.status+' · '+(strategy.intent.side==='buy'?'Long primary / short hedge':'Short primary / long hedge')+' · target '+strategy.intent.quantity;card.append(state);
-  for(const leg of ['primary','hedge']){const p=document.createElement('p');p.textContent=leg+' P&L: не рассчитан · realised: нет данных · unrealised: нет данных';card.append(p);}
+  const state=document.createElement('p');state.textContent=statusText(strategy.status)+' · '+(strategy.intent.side==='buy'?'Покупка на первой / продажа на второй':'Продажа на первой / покупка на второй')+' · объём '+strategy.intent.quantity;card.append(state);
+  for(const leg of ['primary','hedge']){const p=document.createElement('p');p.textContent=(leg==='primary'?'Первая биржа':'Вторая биржа')+' · Прибыль: не рассчитана';card.append(p);}
   const live=document.createElement('button');live.type='button';live.textContent='Лайв · открыть детали';live.addEventListener('click',showDetail);card.append(live);out.append(card);
  });
  $('new-strategy').disabled=Boolean(row.state||row.running);
 }
 function render(row){
  renderStrategies(row);
- $('summary').textContent=(row.running?'Работает':'Заблокировано')+' · '+(row.trading_enabled?'authority активна':'authority закрыта')+' · '+(row.checked?'аккаунты проверены':'нужна свежая проверка');
- $('vault-state').textContent=(row.vaults||[]).map((v,n)=>(n?'Hedge':'Primary')+': '+(v.configured?'ключ зашифрован':'ключ не настроен')).join(' · ');
+ $('raw-state').textContent=JSON.stringify(row.state?{intent_id:row.state.intent?.id,status:row.state.status,phase:row.state.phase,orders:row.state.orders,fills:row.state.fills,journal:row.state.journal}:null,null,2);
+ $('summary').textContent=(row.running?'Работает':'Заблокировано')+' · '+(row.trading_enabled?'торговля разрешена':'торговля запрещена')+' · '+(row.checked?'аккаунты проверены':'нужна свежая проверка');
+ $('vault-state').textContent=(row.vaults||[]).map((v,n)=>(n?'Вторая биржа':'Первая биржа')+': '+(v.configured?'ключ зашифрован':'ключ не настроен')).join(' · ');
  const out=$('ledger');out.replaceChildren();const s=row.state;
  if(!s){out.textContent='Нет сохранённой задачи. Здесь появятся подтверждённые сделки, комиссии и журнал.';return;}
- const title=document.createElement('h3');title.textContent=(s.intent?.id||'')+' · '+s.status+' / '+s.phase;out.append(title);
- const p=document.createElement('p');p.textContent='Primary '+s.primary_filled+' · Hedge '+s.hedge_filled+' · Остаток '+s.residual_base+' · Комиссии '+Object.entries(s.fees_by_currency||{}).map(([k,v])=>v+' '+k).join(', ');out.append(p);
+ const title=document.createElement('h3');title.textContent=strategyName(s.intent?.id)+' · '+statusText(s.status);out.append(title);
+ const p=document.createElement('p');p.textContent='Исполнено на первой: '+s.primary_filled+' · на второй: '+s.hedge_filled+' · Незахеджированный остаток '+s.residual_base+' · Комиссии '+Object.entries(s.fees_by_currency||{}).map(([k,v])=>v+' '+k).join(', ');out.append(p);
  const stamp=document.createElement('p');stamp.className='muted';stamp.textContent='Сохранённое наблюдение: '+(s.observed_at==null?'время неизвестно':new Date(s.observed_at*1000).toLocaleString('ru-RU'))+'. Это не текущая связь с биржей.';out.append(stamp);
  const analytics=document.createElement('div');analytics.className='pair';
  for(const label of ['primary','hedge']){
   const a=s.analytics?.[label],panel=document.createElement('article');panel.className='strategy-card';
-  const h=document.createElement('h3');h.textContent=label+' · фактические fills';panel.append(h);
-  const p=document.createElement('p');p.textContent='Средняя цена: '+(a?.average_price??'нет данных')+' · base: '+(a?.quantity??'нет данных')+' · signed exposure: '+(a?.signed_base??'нет данных');panel.append(p);
+  const h=document.createElement('h3');h.textContent=(label==='primary'?'Первая биржа':'Вторая биржа')+' · исполненные сделки';panel.append(h);
+  const p=document.createElement('p');p.textContent='Средняя цена: '+(a?.average_price??'нет данных')+' · Исполненный объём: '+(a?.quantity??'нет данных');panel.append(p);
   const fee=document.createElement('p');fee.textContent='Уплаченные комиссии: '+(a?.fees_by_currency?Object.entries(a.fees_by_currency).map(([c,v])=>v+' '+c).join(' / '):'нет данных');panel.append(fee);
-  const pnl=document.createElement('p');pnl.textContent='Realised / unrealised P&L: не рассчитан · funding: нет данных, не включён';panel.append(pnl);analytics.append(panel);
+  const pnl=document.createElement('p');pnl.textContent='Прибыль: не рассчитана · Платежи финансирования: нет данных, не включены';panel.append(pnl);analytics.append(panel);
  }
  out.append(analytics);
- const fills=Object.entries(s.fills||{}).flatMap(([leg,rows])=>rows.map(f=>[leg,f.id,f.quantity,f.price,f.executed_at==null?'нет данных':new Date(f.executed_at*1000).toLocaleString('ru-RU'),f.fee+' '+f.fee_currency]));
- out.append(textTable(['Нога','Trade ID','Количество','Цена','Время сделки (биржа)','Комиссия'],fills));
- const missingTime=document.createElement('p');missingTime.className='muted';missingTime.textContent='Если adapter не сохранил exchange timestamp, время сделки недоступно. Время журнала ниже — время наблюдения, не исполнения.';out.append(missingTime);
- out.append(textTable(['№','Время','Событие'],(s.journal||[]).map(e=>[e.sequence,new Date(e.at*1000).toLocaleTimeString('ru-RU'),e.event])));
+ const fills=Object.entries(s.fills||{}).flatMap(([leg,rows])=>rows.map(f=>[leg==='primary'?'Первая биржа':'Вторая биржа',f.quantity,f.price,f.executed_at==null?'нет данных':new Date(f.executed_at*1000).toLocaleString('ru-RU'),f.fee+' '+f.fee_currency]));
+ out.append(textTable(['Биржа','Количество','Цена','Время сделки (биржа)','Комиссия'],fills));
+ const missingTime=document.createElement('p');missingTime.className='muted';missingTime.textContent='Если биржа не передала время сделки, показано «нет данных». Время событий ниже — время наблюдения, не исполнения.';out.append(missingTime);
+ out.append(textTable(['№','Время','Событие'],(s.journal||[]).map(e=>[e.sequence,new Date(e.at*1000).toLocaleTimeString('ru-RU'),eventText(e.event)])));
 }
 function renderAccounts(row){
  const out=$('accounts');out.replaceChildren();
  (row.accounts||[]).forEach((a,n)=>{
-  const h=document.createElement('h3');h.textContent=(n?'Hedge':'Primary')+' · регистрация '+(a.registration_valid?'подтверждена':'не подтверждена')+' · открытых ордеров: '+a.open_order_count;out.append(h);
+  const h=document.createElement('h3');h.textContent=(n?'Вторая биржа':'Первая биржа')+' · регистрация '+(a.registration_valid?'подтверждена':'не подтверждена')+' · открытых ордеров: '+a.open_order_count;out.append(h);
   if(a.positions.length)out.append(textTable(['Фактическая позиция','Количество'],a.positions.map(p=>[p.symbol,p.quantity])));
   else {const p=document.createElement('p');p.textContent='Фактических позиций нет.';out.append(p);}
  });
- const time=document.createElement('p');time.className='muted';time.textContent='Readonly-проверка: '+new Date().toLocaleString('ru-RU')+'. Оба signer закрыты после чтения.';out.append(time);
+ const time=document.createElement('p');time.className='muted';time.textContent='Проверка без торговли: '+new Date().toLocaleString('ru-RU')+'. Доступ к обоим ключам закрыт после чтения.';out.append(time);
 }
 async function poll(){
  const epoch=uiEpoch;
@@ -201,9 +205,9 @@ $('logout').addEventListener('click',async()=>{
 });
 $('load-markets').addEventListener('click',async()=>{
  invalidate(true);const generation=marketGeneration,epoch=uiEpoch;
- $('market-status').textContent='Чтение публичной metadata…';$('load-markets').disabled=true;
+ $('market-status').textContent='Загрузка публичных инструментов…';$('load-markets').disabled=true;
  try{const row=await client.mutate('markets',deploymentPair());if(generation!==marketGeneration||epoch!==uiEpoch)return;
-  marketRows=row.markets;pairOptions(0);pairOptions(1);$('market-status').textContent='Рынки бирж: '+row.markets.map(rows=>rows.length).join(' / ')+' · metadata '+new Date(row.observed_at*1000).toLocaleTimeString('ru-RU')+' · срок '+row.max_age_seconds+' с. Выберите инструменты независимо и проверьте соответствие. '+row.warning;
+  marketRows=row.markets;pairOptions(0);pairOptions(1);$('market-status').textContent='Рынки бирж: '+row.markets.map(rows=>rows.length).join(' / ')+' · обновлены '+new Date(row.observed_at*1000).toLocaleTimeString('ru-RU')+' · срок '+row.max_age_seconds+' с. Выберите инструменты независимо и проверьте соответствие. '+row.warning;
  }catch(error){if(epoch===uiEpoch&&generation===marketGeneration)$('market-status').textContent='Публичная metadata недоступна или пара не поддерживается. Старые данные не используются. Обновите пары.';}
  finally{$('load-markets').disabled=false;}
 });
@@ -215,7 +219,7 @@ $('quote').addEventListener('click',async()=>{
  try{const row=await client.mutate('quote',{...deploymentPair(),primary_symbol:$('pair-select-0').value,hedge_symbol:$('pair-select-1').value,side:common.side,offset_pct:common.offset_pct,protection_bps:common.protection_bps});
   if(generation!==marketGeneration||epoch!==uiEpoch)return;
   quoteData=row;$('save-config').disabled=false;
-  $('quote-status').textContent='Primary LIMIT '+row.legs[0].price+' · Hedge IOC защита '+row.legs[1].price+' · ref '+row.legs.map(l=>l.reference).join(' / ')+' · '+new Date(row.observed_at*1000).toLocaleTimeString('ru-RU')+' · действительно '+row.max_age_seconds+' с. Минимум base: '+row.legs.map(l=>l.min_size).join(' / ')+'. Шаг base: '+row.legs.map(l=>l.size_step).join(' / ')+'.';
+  $('quote-status').textContent='Первая биржа · лимитная цена '+row.legs[0].price+' · Вторая биржа · защитная цена '+row.legs[1].price+' · Опорные цены '+row.legs.map(l=>l.reference).join(' / ')+' · '+new Date(row.observed_at*1000).toLocaleTimeString('ru-RU')+' · действительно '+row.max_age_seconds+' с. Минимальный объём: '+row.legs.map(l=>l.min_size).join(' / ')+'. Шаг объёма: '+row.legs.map(l=>l.size_step).join(' / ')+'.';
  }catch(error){if(generation===marketGeneration&&epoch===uiEpoch)$('quote-status').textContent='Свежие цены недоступны или пара не поддерживается. Исполнение не подготовлено.';}
  finally{$('quote').disabled=false;}
 });
