@@ -94,7 +94,7 @@ class MarketDirectory:
                 supported=bool(row.get('units_verified') and not row.get('is_delisted'))
                 native_rows.append(dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
                     units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Live engine: инструмент не проверен или delisted'))
+                    reason='' if supported else 'Снят биржей с торгов' if row.get('is_delisted') else 'Не поддерживается приложением: инструмент не проверен'))
             for row in raw['order_book_details']:
                 symbol=row.get('symbol','');supported=False
                 try:

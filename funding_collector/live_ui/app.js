@@ -44,6 +44,30 @@ function createClient({fetch:fetcher=root.fetch.bind(root),onAuth=()=>{}}={}){
  }
  return {bootstrap,login,logout,status,mutate,get authenticated(){return authenticated;},get generation(){return generation;}};
 }
+function createMarketLoader({client,onChange}){
+ const flights=new Map(),versions=[0,0];let epoch=0;
+ function reset(){epoch++;flights.clear();versions[0]++;versions[1]++;}
+ async function load(n,deployment){
+  const version=++versions[n],session=epoch;
+  onChange(n,{status:'loading',rows:[]});
+  const lighter=deployment.startsWith('lighter-');
+  // The public API returns a compatible pair catalog. Use a fixed public
+  // companion for each venue; the other selected leg must not gate this list.
+  // Actual selected-pair compatibility/fresh IDs are still checked by quote.
+  const pair={primary:lighter?'hyperliquid-mainnet-native':deployment,hedge:lighter?deployment:'lighter-core-mainnet'};
+  const key=JSON.stringify(pair);
+  let pending=flights.get(key);
+  if(!pending){pending=client.mutate('markets',pair);flights.set(key,pending);}
+  try{
+   const result=await pending;
+   if(session!==epoch||version!==versions[n])return;
+   const rows=result.markets[lighter?1:0];
+   onChange(n,{status:rows.length?'ready':'empty',rows});
+  }catch(error){if(session===epoch&&version===versions[n])onChange(n,{status:'error',rows:[]});}
+  finally{if(flights.get(key)===pending)flights.delete(key);}
+ }
+ return {load,reset};
+}
 function decimalInteger(value,max){
  if(typeof value!=='string'||!/^(0|[1-9][0-9]*)$/.test(value)||value.length>max.length||value.length===max.length&&value>max)throw Error('INVALID_INTEGER');
  return value;
@@ -81,7 +105,7 @@ function buildFarmingPolicy(data,deployments){
 function statusText(value){return ({DONE:'Циклы завершены · обе ноги закрыты',NEW:'Готова к запуску',RUNNING:'Исполняется',UNKNOWN:'Результат неизвестен — нужна сверка',ATTENTION:'Требуется ручная сверка',COMPLETED_CONFIRMED:'Исполнено',CONFIGURED:'Настроена'})[value]||'Ожидает запуска';}
 function strategyName(id){const name=String(id||'').replace(/-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,'');return !name||name==='dn'?'Ручная стратегия':name;}
 function eventText(value){return ({farming_created:'Созданы ограниченные автоматические циклы',opening_turnover_reserved:'Учтён лимит оборота открытия',both_legs_hedged_hold_started:'Обе ноги подтверждены; начался отсчёт удержания',write_ahead_close_primary:'Подготовлено reduce-only закрытие первой ноги',write_ahead_close_hedge:'Подготовлено reduce-only закрытие второй ноги',close_primary_ack_not_fill:'Ответ на закрытие первой ноги — это ещё не сделка',close_hedge_ack_not_fill:'Ответ на закрытие второй ноги — это ещё не сделка',close_primary_confirmed_trades:'Подтверждены сделки закрытия первой ноги',close_hedge_confirmed_trades:'Подтверждены сделки закрытия второй ноги',both_legs_confirmed_flat_done:'Обе ноги закрыты; циклы завершены',flat_random_delay_persisted:'Обе ноги закрыты; сохранена задержка перед следующим циклом',next_bounded_cycle:'Начат следующий ограниченный цикл',farming_requires_attention:'Циклы остановлены; нужна ручная сверка позиций и заявок',created:'Стратегия сохранена',reconciled_flat_baseline:'Проверены позиции и открытые заявки',reconciled_before_hedge:'Первый объём подтверждён; проверена вторая биржа',write_ahead_primary:'Подготовлена заявка на первой бирже',write_ahead_hedge:'Подготовлена встречная заявка на второй бирже',primary_ack_not_fill:'Первая биржа ответила на заявку — это ещё не сделка',hedge_ack_not_fill:'Вторая биржа ответила на заявку — это ещё не сделка',primary_confirmed_trades:'Подтверждены сделки на первой бирже',hedge_confirmed_trades:'Подтверждены сделки на второй бирже',unknown_primary:'Результат первой заявки неизвестен; повтор запрещён',unknown_hedge:'Результат второй заявки неизвестен; повтор запрещён',failure_requires_attention:'Исполнение остановлено: нужна ручная сверка',completed_confirmed_positions_remain_open:'Обе ноги исполнены; позиции остаются открытыми'})[value]||'Состояние обновлено';}
-if(typeof module!=='undefined'&&module.exports)module.exports={createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig,buildFarmingPolicy,statusText,eventText,strategyName};
+if(typeof module!=='undefined'&&module.exports)module.exports={createMarketLoader,createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig,buildFarmingPolicy,statusText,eventText,strategyName};
 if(typeof document==='undefined')return;
 const $=id=>document.getElementById(id);
 const sensitive=()=>document.querySelectorAll('input[type=password]');
@@ -104,7 +128,7 @@ function input(label,name,{password=false,required=true,value=''}={}){
 let marketRows=[[],[]],quoteData=null,marketGeneration=0;
 function invalidate(markets=false){
  marketGeneration++;quoteData=null;$('save-config').disabled=true;$('quote-status').textContent='Цена ещё не рассчитана.';
- if(markets){marketRows=[[],[]];for(let n=0;n<2;n++){$('pair-select-'+n).replaceChildren(new Option('Загрузите рынки',''));$('instrument-'+n).textContent='Инструмент не выбран.';}$('market-status').textContent='Выбор бирж изменён. Обновите рынки.';}
+ if(markets){marketLoader.reset();marketRows=[[],[]];for(let n=0;n<2;n++){$('pair-select-'+n).replaceChildren(new Option('Выберите инструмент',''));$('pair-select-'+n).disabled=true;$('retry-markets-'+n).hidden=true;$('instrument-'+n).textContent='Инструмент не выбран.';}}
 }
 function farmingAvailability(){
  const supported=[$('primary-deployment').value,$('hedge-deployment').value].every(v=>['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet'].includes(v));
@@ -116,13 +140,20 @@ $('farming-enabled').addEventListener('change',farmingAvailability);
 const deploymentPair=()=>({primary:$('primary-deployment').value,hedge:$('hedge-deployment').value});
 function instrumentSummary(n){const row=marketRows[n].find(r=>r.symbol===$('pair-select-'+n).value);$('instrument-'+n).textContent=row?row.label+' · базовый актив '+row.base+' · '+row.units:'Инструмент не выбран.';}
 function pairOptions(n){
- const select=$('pair-select-'+n),selected=select.value,search=$('pair-search-'+n).value.trim().toUpperCase();
- select.replaceChildren(new Option('Выберите инструмент этой биржи',''));
- marketRows[n].filter(p=>p.symbol.toUpperCase().includes(search)).forEach(p=>{const o=new Option(p.label+(p.supported?'':' · недоступно: '+p.reason),p.symbol);o.disabled=!p.supported;select.append(o);});
- if([...select.options].some(o=>o.value===selected))select.value=selected;
- else invalidate();
+ const select=$('pair-select-'+n);
+ select.replaceChildren(new Option('Выберите инструмент',''));
+ marketRows[n].forEach(p=>{const o=new Option(p.label,p.symbol);o.disabled=!p.supported;o.title=p.reason||'';select.append(o);});
  instrumentSummary(n);
 }
+const marketLoader=createMarketLoader({client,onChange(n,state){
+ invalidate();marketRows[n]=state.rows;
+ const select=$('pair-select-'+n);select.disabled=state.status!=='ready';
+ $('retry-markets-'+n).hidden=!['empty','error'].includes(state.status);
+ if(state.status==='ready')pairOptions(n);
+ else {select.replaceChildren(new Option(({loading:'Загрузка инструментов…',empty:'Нет доступных инструментов',error:'Не удалось загрузить инструменты'})[state.status],''));instrumentSummary(n);}
+ $('market-state-'+n).textContent=({loading:'Загрузка инструментов…',ready:'Список биржи загружен.',empty:'Биржа вернула пустой список. Попробуйте ещё раз.',error:'Не удалось получить публичный список. Старые данные не используются.'})[state.status];
+}});
+function loadLeg(n){return marketLoader.load(n,$(n?'hedge-deployment':'primary-deployment').value);}
 const tabs=['trade','connections','diagnostics'];
 function openTab(name){clearSecrets();tabs.forEach(t=>{const active=t===name;$('tab-'+t).setAttribute('aria-selected',String(active));$('tab-'+t).tabIndex=active?0:-1;$(t).hidden=!active;});}
 tabs.forEach((name,n)=>{const button=$('tab-'+name);button.addEventListener('click',()=>openTab(name));button.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?2:(n+(event.key==='ArrowRight'?1:2))%3;openTab(tabs[next]);$('tab-'+tabs[next]).focus();}});});
@@ -139,9 +170,9 @@ for(let n=0;n<2;n++){
  function conditional(){
   title.textContent=select.selectedOptions[0].textContent;
   box.querySelector('[name=api_key_index]').parentElement.hidden=!select.value.startsWith('lighter-');
-  invalidate(true);clearSecrets();
+  clearSecrets();
  }
- select.addEventListener('change',()=>{conditional();farmingAvailability();});conditional();
+ select.addEventListener('change',()=>{conditional();farmingAvailability();if(client.authenticated&&$('strategy-modal').open)loadLeg(n);else invalidate(true);});conditional();
 }
 farmingAvailability();
 function values(form){return Object.fromEntries(new FormData(form));}
@@ -153,7 +184,7 @@ function textTable(headers,rows){
 }
 let cardsSignature='';
 function showDetail(){$('strategy-modal').close();$('strategies').hidden=true;$('strategy-detail').hidden=false;clearSecrets();}
-$('new-strategy').addEventListener('click',()=>{$('strategy-modal').showModal();});
+$('new-strategy').addEventListener('click',()=>{$('strategy-modal').showModal();loadLeg(0);loadLeg(1);});
 $('close-strategy').addEventListener('click',()=>{$('strategy-modal').close();});
 $('back-strategies').addEventListener('click',()=>{$('strategies').hidden=false;$('strategy-detail').hidden=true;clearSecrets();});
 function renderStrategies(row){
@@ -231,15 +262,7 @@ $('login').addEventListener('submit',event=>{
 $('logout').addEventListener('click',async()=>{
  clearSecrets();await logoutAndRefresh(client,()=>{gate(false);$('message').textContent='Связь потеряна. Authority ограничена TTL; проверьте сервер.';});
 });
-$('load-markets').addEventListener('click',async()=>{
- invalidate(true);const generation=marketGeneration,epoch=uiEpoch;
- $('market-status').textContent='Загрузка публичных инструментов…';$('load-markets').disabled=true;
- try{const row=await client.mutate('markets',deploymentPair());if(generation!==marketGeneration||epoch!==uiEpoch)return;
-  marketRows=row.markets;pairOptions(0);pairOptions(1);$('market-status').textContent='Рынки бирж: '+row.markets.map(rows=>rows.length).join(' / ')+' · обновлены '+new Date(row.observed_at*1000).toLocaleTimeString('ru-RU')+' · срок '+row.max_age_seconds+' с. Выберите инструменты независимо и проверьте соответствие. '+row.warning;
- }catch(error){if(epoch===uiEpoch&&generation===marketGeneration)$('market-status').textContent='Публичная metadata недоступна или пара не поддерживается. Старые данные не используются. Обновите пары.';}
- finally{$('load-markets').disabled=false;}
-});
-for(let n=0;n<2;n++){$('pair-search-'+n).addEventListener('input',()=>pairOptions(n));$('pair-select-'+n).addEventListener('change',()=>{invalidate();instrumentSummary(n);});}
+for(let n=0;n<2;n++){$('retry-markets-'+n).addEventListener('click',()=>loadLeg(n));$('pair-select-'+n).addEventListener('change',()=>{invalidate();instrumentSummary(n);});}
 for(const name of ['side','offset_pct','protection_bps'])$('config').elements[name].addEventListener('input',()=>invalidate());
 $('quote').addEventListener('click',async()=>{
  invalidate();const generation=marketGeneration,epoch=uiEpoch,common=values($('config'));
