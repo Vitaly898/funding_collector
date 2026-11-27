@@ -27,16 +27,16 @@ class NativeAdapterTests(unittest.TestCase):
             self.assertEqual([x.args[0] for x in info.call_args_list], [
                 {'type':'spotMeta'},{'type':'metaAndAssetCtxs','dex':''},{'type':'l2Book','coin':'ETH'}])
             self.assertEqual(market.market_id,0)
-            self.assertEqual(market.raw['underlying_id'],'crypto:ETH')
-            self.assertEqual((p['dex'],p['collateral_asset'],p['oracle_price_currency']),('','USDC','USDT'))
-            self.assertIn('quanto',p['settlement_basis_warning'])
+            self.assertEqual(market.raw['underlying_id'],'hyperliquid-mainnet-native:ETH')
+            self.assertEqual((p['dex'],p['collateral_asset'],p['oracle_price_currency']),('','USDC','venue oracle benchmark; no cross-venue identity inference'))
+            self.assertIn('NOT prove equal spot exposure',p['settlement_basis_warning'])
             self.assertEqual(depth.walk('buy','0.02',1001,5)['vwap'],h.Decimal('3000.1'))
             with self.assertRaises(Reject): depth.walk('buy','0.02',1006,5)
             market.validate('0.02','3000.1')
             for qty,px in [('0.00001','3000'),('0.001','3000'),('0.02','3000.11'),('0.02','3000.001')]:
                 with self.subTest(qty=qty,px=px),self.assertRaises(Reject):market.validate(qty,px)
             market.validate('1','123456')  # All integer prices allowed, regardless of sig figs.
-        for coin in ('io:ETH','kPEPE','WBTC'):
+        for coin in ('io:ETH','@1','ETH/USD'):
             with tempfile.TemporaryDirectory() as root, patch.object(h.HyperliquidPublicClient,'info') as info:
                 with self.subTest(coin=coin),self.assertRaises(Reject):h.HyperliquidPublicAdapter(root).snapshot(coin)
                 info.assert_not_called()
@@ -105,7 +105,7 @@ class NativeIntegrationTests(unittest.TestCase):
         a=Connection('hyperliquid',Deployment('hyperliquid-mainnet-native','hyperliquid'),'paper-hl','hl')
         b=Connection('core',Deployment('core','lighter'),'paper-core','core')
         other=Instrument('ETH',0,'ETH','USD','linear_perpetual','base','1',True,
-                         '0.0001','0.01','0.0001','10',raw={'multiplier':'1','quote_multiplier':'1'})
+                         '0.0001','0.01','0.0001','10',raw={'symbol':'ETH','multiplier':'1','quote_multiplier':'1'})
         h.validate_pair([(a,native),(b,other)])
         for symbol in ('WBTC','kETH','io:ETH','ETH-USD'):
             other.symbol=symbol

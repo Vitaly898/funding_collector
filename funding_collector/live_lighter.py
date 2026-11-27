@@ -18,8 +18,9 @@ class LighterPrivate:
                 or signer.chain_id!=DEPLOYMENTS[identity.deployment][1] or signer.account_index!=int(identity.account)
                 or list(signer.api_key_dict)!=[identity.api_key_index]
                 or hashlib.sha256(bytes.fromhex(signer.api_key_dict[identity.api_key_index])).hexdigest()!=identity.signer
-                or market.symbol not in ('BTC','ETH','SOL','NVDA') or market.multiplier!=1
-                or market.raw.get('market_type')!='perp'):
+                or (market.symbol,market.market_id)!=(authority.symbol,authority.asset_id)
+                or market.multiplier!=1 or not market.units_verified or market.quantity_unit!='base'
+                or market.contract_type!='linear_perpetual' or market.raw.get('market_type')!='perp'):
             raise Reject('Core SDK deployment/account/API-key/market mismatch')
         self.signer,self.accounts,self.identity,self.market,self.authority=signer,account_api,identity,market,authority
         self.ledger=OrderLedger(journal,identity)

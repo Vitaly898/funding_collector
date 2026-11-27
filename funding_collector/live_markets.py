@@ -1,7 +1,7 @@
-"""Credential-free directory of reviewed live-UI pairs. No inferred asset IDs.
+"""Independent public instrument directories; no inferred economic equivalence.
 
-Catalog freshness is not executable depth acceptance: check/start still perform
-supervised.validate_public with fresh snapshots before opening either signer.
+Catalogs read metadata only. Quotes fetch current depth/mark for selected rows;
+check/start revalidate fresh scopes before constructing either private signer.
 """
 from pathlib import Path
 import math
@@ -10,7 +10,10 @@ from .domain import Reject
 
 HL='hyperliquid-mainnet-native'
 ENT='entropy-mainnet-io'
+ASTER='aster-mainnet'
+EXT='extended-mainnet-starknet'
 LIGHTER={'lighter-core-mainnet':'core','lighter-rh-mainnet':'rh'}
+SUPPORTED=(HL,ENT,ASTER,EXT,*LIGHTER)
 MAX_AGE=60
 
 
@@ -21,6 +24,12 @@ def public_adapter(root, deployment):
     if deployment==ENT:
         from .entropy import EntropyPublicAdapter
         return EntropyPublicAdapter(root)
+    if deployment==ASTER:
+        from .aster import AsterPublicAdapter
+        return AsterPublicAdapter(root)
+    if deployment==EXT:
+        from .extended import ExtendedPublicAdapter
+        return ExtendedPublicAdapter(root)
     if deployment in LIGHTER:
         from .lighter import LighterPublicAdapter
         return LighterPublicAdapter(LIGHTER[deployment],root)
@@ -40,77 +49,99 @@ class MarketDirectory:
 
     @staticmethod
     def deployments(primary, hedge):
-        if not ((primary in (HL,ENT) and hedge in LIGHTER) or
-                (hedge in (HL,ENT) and primary in LIGHTER)):
-            raise Reject('select independent HL native or Entropy and Lighter Core/RH')
+        if primary not in SUPPORTED or hedge not in SUPPORTED or primary==hedge:
+            raise Reject('two distinct supported deployments required')
 
     def _adapter(self, deployment):
         return self.factory(self.root/deployment,deployment)
 
     @staticmethod
     def _validate(primary, hedge, markets):
-        from .adapters import Connection, Deployment
-        from .hyperliquid import validate_pair as native_pair
-        from .entropy import validate_pair as entropy_pair
-        entries=[]
-        for dep,market in zip((primary,hedge),markets):
-            venue='hyperliquid' if dep==HL else 'entropy' if dep==ENT else 'lighter'
-            name='hyperliquid-mainnet-io' if dep==ENT else LIGHTER.get(dep,dep)
-            entries.append((Connection(dep,Deployment(name,venue),'public-ui','public-ui'),market))
-        (entropy_pair if ENT in (primary,hedge) else native_pair)(entries)
+        MarketDirectory.deployments(primary,hedge)
+        for market in markets:
+            if (market.quote_asset!='USD' or market.contract_type!='linear_perpetual'
+                    or market.quantity_unit!='base' or market.multiplier!=1 or not market.units_verified):
+                raise Reject('unsupported technical contract units')
 
     @staticmethod
     def _leg(market):
-        return dict(symbol=market.symbol,asset_id=market.market_id,size_step=str(market.size_step),
-                    price_step=str(market.price_step),min_size=str(market.min_size),min_notional=str(market.min_quote))
+        identity=market.market_id
+        # Browser JSON numbers cannot represent wide synthetic IDs / local hashes.
+        if type(identity) is not int or identity<0:raise Reject('invalid metadata asset ID')
+        return dict(symbol=market.symbol,asset_id=str(identity) if identity>2**53-1 else identity,
+                    size_step=str(market.size_step),price_step=str(market.price_step),
+                    min_size=str(market.min_size),min_notional=str(market.min_quote))
+
+    @staticmethod
+    def _market(deployment,row):
+        if deployment==HL:
+            from .hyperliquid import HyperliquidInstrument
+            return HyperliquidInstrument(row)
+        if deployment==ENT:
+            from .entropy import EntropyInstrument
+            return EntropyInstrument(row)
+        if deployment==ASTER:
+            from .aster import AsterInstrument
+            return AsterInstrument(row)  # no synthetic mark; metadata validation only
+        if deployment==EXT:
+            from .extended import private_market
+            return private_market(row)
+        from .public import resolve_market
+        return resolve_market(dict(code=200,order_book_details=[row]),row.get('symbol',''))
+
+    @staticmethod
+    def _listings(deployment,data):
+        if deployment in LIGHTER and data.get('code')!=200:raise Reject('metadata API error')
+        source=(data['markets'] if deployment in (HL,ENT) else data['symbols'] if deployment==ASTER
+                else data['data'] if deployment==EXT else data['order_book_details'])
+        rows=[]
+        for row in source:
+            symbol=row.get('coin','') if deployment in (HL,ENT) else row.get('name','') if deployment==EXT else row.get('symbol','')
+            result=dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
+                        units='непроверенные единицы',supported=False,
+                        reason='Снят биржей с торгов' if row.get('is_delisted') else 'Не поддерживается приложением: инструмент не проверен')
+            try:
+                market=MarketDirectory._market(deployment,row)
+                if not market.units_verified or market.multiplier!=1:raise Reject('unsupported units')
+                result.update(MarketDirectory._leg(market),symbol=symbol,base=market.base_asset,
+                              units='контрактные base-единицы · multiplier 1',supported=True,reason='')
+                if deployment==ASTER:result['identity_kind']='local symbol digest; NOT exchange asset index'
+            except (Reject,KeyError,TypeError,ValueError):pass
+            rows.append(result)
+        # Duplicates are never resolved by first-match selection.
+        for row in rows:
+            if sum(other['symbol']==row['symbol'] for other in rows)!=1:
+                row.update(supported=False,reason='Неоднозначный идентификатор в metadata биржи')
+        return rows
+
+    def venue(self, deployment):
+        if deployment not in SUPPORTED:raise Reject('unsupported directory deployment')
+        try:
+            adapter=self._adapter(deployment)
+            if deployment in (HL,ENT):
+                data=adapter.catalog();at=data['observed_at_unix_s']
+            else:
+                route='fapi/v3/exchangeInfo' if deployment==ASTER else 'info/markets' if deployment==EXT else 'orderBookDetails'
+                data,at=adapter.client.get(route)
+            return dict(deployment=deployment,markets=self._listings(deployment,data),
+                        observed_at=fresh(at),max_age_seconds=MAX_AGE)
+        except Exception:
+            raise Reject('public metadata unavailable or unverified; no fallback') from None
 
     def catalog(self, primary, hedge):
         self.deployments(primary,hedge)
-        try:
-            from .hyperliquid import HyperliquidInstrument
-            from .entropy import EntropyInstrument
-            from .public import resolve_market
-            native=primary if primary in (HL,ENT) else hedge
-            light=hedge if hedge in LIGHTER else primary
-            catalog=self._adapter(native).catalog()
-            raw,at=self._adapter(light).client.get('orderBookDetails')
-            observed=min(fresh(catalog['observed_at_unix_s']),fresh(at))
-            pairs=[]
-            for row in catalog['markets']:
-                if not row.get('units_verified') or row.get('is_delisted'):continue
-                try:
-                    m=(HyperliquidInstrument if native==HL else EntropyInstrument)(row)
-                    other=resolve_market(raw,m.base_asset)
-                    markets=[m,other] if primary==native else [other,m]
-                    self._validate(primary,hedge,markets)
-                    pairs.append(dict(base=m.base_asset,label=m.base_asset+' / USD · perpetual',
-                                      legs=[self._leg(x) for x in markets]))
-                except (Reject,KeyError,TypeError,ValueError):continue
-            # A base must resolve unambiguously, never pick the first duplicate.
-            pairs=[p for p in pairs if sum(x['base']==p['base'] for x in pairs)==1]
-            native_rows=[];light_rows=[]
-            for row in catalog['markets']:
-                symbol=row.get('coin','')
-                supported=bool(row.get('units_verified') and not row.get('is_delisted'))
-                native_rows.append(dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
-                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Live engine: инструмент не проверен или delisted'))
-            for row in raw['order_book_details']:
-                symbol=row.get('symbol','');supported=False
-                try:
-                    from .public import resolve_market
-                    market=resolve_market(raw,symbol)
-                    supported=symbol in ('BTC','ETH','SOL','NVDA') and market.multiplier==1
-                except (Reject,KeyError,TypeError,ValueError):pass
-                light_rows.append(dict(symbol=symbol,label=symbol,base=row.get('base_asset',symbol),
-                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Live engine: только проверенные BTC/ETH/SOL/NVDA, active linear perp'))
-            listings=[native_rows,light_rows] if primary==native else [light_rows,native_rows]
-            return dict(primary=primary,hedge=hedge,pairs=sorted(pairs,key=lambda p:p['base']),markets=listings,
-                        observed_at=observed,max_age_seconds=MAX_AGE,
-                        warning='Равные base-единицы не гарантируют одинаковый oracle, funding и settlement basis.')
-        except Exception:
-            raise Reject('public metadata unavailable or unverified; no fallback') from None
+        catalogs=[self.venue(dep) for dep in (primary,hedge)]
+        listings=[c['markets'] for c in catalogs]
+        pairs=[]
+        for row in listings[0]:
+            matches=[r for r in listings[1] if r['base']==row['base'] and r['supported']]
+            if row['supported'] and len(matches)==1:
+                legs=[{k:r[k] for k in ('symbol','asset_id','size_step','price_step','min_size','min_notional')} for r in (row,matches[0])]
+                pairs.append(dict(base=row['base'],label=row['base']+' / USD · perpetual',legs=legs))
+        pairs=[p for p in pairs if sum(x['base']==p['base'] for x in pairs)==1]
+        return dict(primary=primary,hedge=hedge,pairs=sorted(pairs,key=lambda p:p['base']),markets=listings,
+                    observed_at=min(c['observed_at'] for c in catalogs),max_age_seconds=MAX_AGE,
+                    warning='Контрактные единицы разных бирж не гарантируют равную spot/share экспозицию; экономическое соответствие выбирает пользователь. Aster: USDT, USD только расчётный ориентир.')
 
     def quote(self, primary, hedge, base=None, *, primary_symbol=None, hedge_symbol=None, side='buy', offset_pct='0', protection_bps='50'):
         from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
@@ -120,7 +151,7 @@ class MarketDirectory:
             raise Reject('invalid offset or protection')
         catalog=self.catalog(primary,hedge)
         if primary_symbol is None and hedge_symbol is None:
-            if not isinstance(base,str) or not 1<=len(base)<=30:raise Reject('invalid base')
+            if not isinstance(base,str) or not 1<=len(base)<=40:raise Reject('invalid base')
             matches=[p for p in catalog['pairs'] if p['base']==base]
             if len(matches)!=1:raise Reject('unknown or unsupported pair')
             selected=matches[0]['legs']
@@ -135,15 +166,19 @@ class MarketDirectory:
             legs=[];markets=[];times=[catalog['observed_at']]
             for dep,leg in zip((primary,hedge),selected):
                 market,book,_=self._adapter(dep).snapshot(leg['symbol'])
-                if 'asset_id' in leg and (market.symbol,market.market_id)!=(leg['symbol'],leg['asset_id']):raise Reject('metadata changed')
+                # Verify wire identity BEFORE converting to private base-symbol scope.
+                if market.symbol!=leg['symbol']:raise Reject('metadata symbol changed')
+                if dep==ASTER:market.symbol=market.base_asset
+                if dep==EXT:
+                    from .extended import private_market
+                    market=private_market(market.raw)
+                if str(market.market_id)!=str(leg['asset_id']):raise Reject('metadata ID changed')
                 leg=self._leg(market)
                 markets.append(market);times.append(fresh(book.observed_at))
                 bid=book.sides['bids'][0][0];ask=book.sides['asks'][0][0]
                 reference=(bid+ask)/2
-                n=len(legs)
-                buy=(side=='buy') if n==0 else (side!='buy')
+                n=len(legs);buy=(side=='buy') if n==0 else (side!='buy')
                 fraction=offset/100 if n==0 else protection/10000
-                # Primary rounds away from crossing; IOC rounds outward to its explicit bound.
                 up=(not buy) if n==0 else buy
                 price=reference*(1+fraction if up else 1-fraction)
                 step=market.price_step

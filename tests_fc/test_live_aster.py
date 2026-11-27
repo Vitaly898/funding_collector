@@ -46,7 +46,7 @@ class AsterTests(unittest.IsolatedAsyncioTestCase):
         identity = Identity('aster-mainnet', OWNER, Account.from_key(DUMMY).address)
         market = AsterInstrument(metadata(), '2000')
         market.symbol = market.base_asset
-        authority = Authority(identity, 'ETH', 1, D('1'), D('5000'), D('100'))
+        authority = Authority(identity, 'ETH', market.market_id, D('1'), D('5000'), D('100'))
         values = dict(identity=identity, secret=DUMMY, market=market, authority=authority,
                       journal=Path(self.root.name)/'journal', transport=self.wire)
         values.update(changes)

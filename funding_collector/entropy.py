@@ -1,7 +1,7 @@
 """Entropy's own HIP-3 io deployment. Public reads only; no SDK or keys.
 
-Explicit reviewed identities, not ticker inference. All pre-IPO, international,
-index and unreviewed units remain visible in catalog but cannot enter a hedge.
+Exact venue-qualified contract units, never inferred spot/share equivalence.
+Economic correspondence across independently selected contracts is operator-owned.
 """
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
@@ -21,11 +21,10 @@ USDC_TOKEN_ID = '0x6d1e7cde53ba9467b783cb7c530ce054'
 EQUITY_SOURCE = 'https://docs.entropy.io/asset-directory/equity-assets'
 UNITS_SOURCE = 'https://docs.entropy.io/market-types/equity-perpetuals'
 LIGHTER_SOURCE = 'https://docs.lighter.xyz/trading/real-world-assets-rwas/market-specifications'
-# Explicit USD per one US-listed share, no corporate-action scaling.
-REVIEWED_EQUITIES = {'io:NVDA': 'equity:US:NVDA', 'io:AAPL': 'equity:US:AAPL',
-                     'io:SNDK': 'equity:US:SNDK', 'io:CRCL': 'equity:US:CRCL',
-                     'io:NBIS': 'equity:US:NBIS', 'io:IONQ': 'equity:US:IONQ',
-                     'io:GPRO': 'equity:US:GPRO'}
+def contract_identity(coin):
+    if not isinstance(coin,str) or not re.fullmatch(r'io:[A-Z0-9_.-]{1,30}',coin):
+        raise Reject('exact Entropy io contract required')
+    return 'entropy:'+coin
 
 
 class EntropyPublicClient:
@@ -107,6 +106,7 @@ class EntropyPublicClient:
 
 
 def resolve_contract(meta_context, dexs, spot, coin):
+    identity=contract_identity(coin)
     meta, contexts = meta_context
     indexes = [i for i, d in enumerate(dexs) if d and d.get('name') == 'io']
     if len(indexes) != 1 or indexes[0] < 1:
@@ -131,9 +131,9 @@ def resolve_contract(meta_context, dexs, spot, coin):
                 dex='io', dex_index=indexes[0], index_in_meta=index,
                 size_step=format(Decimal(10) ** -decimals, 'f'), sz_decimals=decimals,
                 collateral_asset='USDC', collateral_token_id=USDC_TOKEN_ID,
-                price_unit='USD per share' if coin in REVIEWED_EQUITIES else 'UNVERIFIED_FOR_HEDGE',
-                price_currency='USD', multiplier='1' if coin in REVIEWED_EQUITIES else None,
-                underlying_id=REVIEWED_EQUITIES.get(coin), units_verified=coin in REVIEWED_EQUITIES,
+                price_unit='USD per '+coin+' contract unit',
+                price_currency='USD', multiplier='1',
+                underlying_id=identity, units_verified=True,
                 is_delisted=raw.get('isDelisted', False), raw=raw, context=contexts[index],
                 funding_interval_seconds=3600, funding_unit='decimal fraction per hour; current estimate',
                 units_sources=[EQUITY_SOURCE, UNITS_SOURCE])
@@ -156,11 +156,7 @@ class EntropyInstrument(Instrument):
 
 
 def validate_pair(entries):
-    """Only reviewed one-share US equity vs exact Core/RH contract.
-
-    Entropy's catalog is not permission to pair with another deployer or a
-    frontend-aggregated market. Countervenue funding/oracle basis still differs.
-    """
+    """Technical contract units only; never a spot/share equivalence claim."""
     entropy = [(c, m) for c, m in entries if c.deployment.venue == 'entropy']
     others = [(c, m) for c, m in entries if c.deployment.venue != 'entropy']
     if len(entropy) != 1 or len(others) != 1:
@@ -168,14 +164,14 @@ def validate_pair(entries):
     ec, em = entropy[0]
     oc, om = others[0]
     if (ec.deployment.id != 'hyperliquid-mainnet-io' or not isinstance(em, EntropyInstrument)
-            or em.raw.get('underlying_id') != REVIEWED_EQUITIES.get(em.symbol)
+            or em.raw.get('underlying_id') != contract_identity(em.symbol)
             or not em.raw.get('units_verified') or em.raw.get('is_delisted')
-            or oc.deployment.venue != 'lighter' or oc.deployment.id not in ('core', 'rh')
-            or om.symbol != em.symbol.removeprefix('io:') or om.base_asset != em.base_asset
-            or number(om.raw.get('multiplier', '0')) != 1
-            or number(om.raw.get('quote_multiplier', '0')) != 1
+            or (oc.deployment.venue,oc.deployment.id) not in (('lighter','core'),('lighter','rh'),('hyperliquid','hyperliquid-mainnet-native'),('aster','aster-mainnet-v3'),('extended','starknet-mainnet'))
+            or om.contract_type!='linear_perpetual' or om.quantity_unit!='base'
             or om.quote_asset != 'USD' or om.multiplier != 1 or not om.units_verified):
         raise Reject('no proven compatible Entropy pair: deployment/underlying/base/price units mismatch')
+    if oc.deployment.venue=='lighter' and (number(om.raw.get('multiplier','1'))!=1 or number(om.raw.get('quote_multiplier','1'))!=1):
+        raise Reject('unsupported Lighter unit multiplier')
 
 
 class EntropyPublicAdapter:

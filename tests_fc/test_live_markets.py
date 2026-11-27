@@ -26,6 +26,32 @@ def adapters(root, deployment):
     return SimpleNamespace(client=SimpleNamespace(get=lambda route: (dict(code=200,order_book_details=[light]),now)),
         snapshot=lambda symbol:(Market(light),book(now),{}))
 
+def test_catalog_distinguishes_delisted_from_invalid_units_without_enabling_unverified(tmp_path):
+    from funding_collector.live_markets import MarketDirectory
+    from funding_collector.hyperliquid import resolve_contract
+    def listings(root, dep):
+        adapter = adapters(root, dep)
+        if dep == HL:
+            original = adapter.catalog
+            def catalog():
+                data = original()
+                eth = data['markets'][0]
+                data['markets'] = [eth, dict(eth, coin='DOGE', units_verified=False),
+                                   dict(eth, coin='OLD', is_delisted=True)]
+                return data
+            adapter.catalog = catalog
+        return adapter
+    rows = MarketDirectory(tmp_path, factory=listings).catalog(HL, CORE)['markets'][0]
+    assert [(r['symbol'], r['supported'], r['reason']) for r in rows] == [
+        ('ETH', True, ''),
+        ('DOGE', False, 'Не поддерживается приложением: инструмент не проверен'),
+        ('OLD', False, 'Снят биржей с торгов'),
+    ]
+    for coin in ('BTC', 'ETH', 'SOL', 'DOGE'):
+        # The source resolver, not the dropdown, owns the reviewed-unit guard.
+        assert resolve_contract(native_meta(coin), native_spot(), coin)['units_verified']
+
+
 def book(now):
     return Book(dict(bids=[dict(price='2999',remaining_base_amount='10')],asks=[dict(price='3001',remaining_base_amount='10')]),now)
 
@@ -55,7 +81,7 @@ def test_catalog_resolves_dynamic_ids_and_both_primary_directions(tmp_path):
     for bad in ['NaN','-1','101']:
         with pytest.raises(Reject):d.quote(HL,CORE,'ETH',offset_pct=bad)
 
-@pytest.mark.parametrize('pair',[(HL,HL),(HL,ENT),(CORE,RH),('evil',CORE)])
+@pytest.mark.parametrize('pair',[(HL,HL),(CORE,CORE),('evil',CORE)])
 def test_unsupported_deployments_fail_before_transport(tmp_path,pair):
     from funding_collector.live_markets import MarketDirectory
     d=MarketDirectory(tmp_path,factory=lambda *a:pytest.fail('unexpected public read'))

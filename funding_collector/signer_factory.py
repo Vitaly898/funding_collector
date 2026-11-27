@@ -76,12 +76,10 @@ def aster_snapshot(public, spec):
 
 def extended_snapshot(public, spec):
     """Exact reviewed base->wire mapping; retain the original settlement metadata."""
-    from .extended import normalize_market
+    from .extended import private_market
     market,book,meta=public.snapshot(spec.symbol+'-USD')
     if market.symbol!=spec.symbol+'-USD':raise Reject('Extended wire market mismatch')
-    market=normalize_market(market.raw)
-    market.symbol=market.base_asset
-    market.market_id=int(market.raw['l2Config']['syntheticId'],16)
+    market=private_market(market.raw)
     _scope(spec,market)
     return market,book,meta
 
@@ -89,7 +87,7 @@ def extended_snapshot(public, spec):
 def _scope(spec, market):
     if (market.symbol,market.market_id)!=(spec.symbol,spec.asset_id):
         raise Reject('public market scope mismatch')
-    base='NVDA' if spec.identity.deployment=='entropy-mainnet-io' and spec.symbol=='io:NVDA' else spec.symbol
+    base=spec.symbol.removeprefix('io:') if spec.identity.deployment=='entropy-mainnet-io' else spec.symbol
     if market.base_asset!=base or not market.units_verified or market.multiplier!=1:
         raise Reject('unverified exact base units')
     return market

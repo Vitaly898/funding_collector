@@ -209,7 +209,9 @@ class EntropyPrivateTests(unittest.TestCase):
                 raw=dict(symbol='NVDA',market_id=1,market_type='perp',status='active',supported_size_decimals=3,
                     supported_price_decimals=2,min_base_amount='.001',min_quote_amount='10')
                 if fault in ('AAPL','TSLA','DOGE','io:NVDA'):
-                    spec=replace(spec,symbol=fault);raw['symbol']=fault
+                    # These are now valid standalone symbols, but not the
+                    # selected NVDA scope: metadata substitution must fail.
+                    raw['symbol']=fault
                 if fault=='base':raw['base_asset']='AAPL'
                 if fault=='asset':raw['market_id']=2
                 if fault in ('multiplier','quote_multiplier'):raw[fault]='100'
@@ -290,17 +292,17 @@ class EntropyPrivateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             spec,_=scope(root)
             native=Identity('hyperliquid-mainnet-native',spec.identity.account,spec.identity.signer)
-            for dep,symbol in ((spec.identity,'NVDA'),(spec.identity,'io:AAPL'),(native,'NVDA'),(native,'io:NVDA')):
+            for dep,symbol in ((spec.identity,'NVDA'),(spec.identity,'xyz:AAPL'),(native,'@NVDA'),(native,'io:NVDA')):
                 with self.subTest(symbol=symbol),self.assertRaises(Reject):Authority(dep,symbol,1,'1','500','50')
             for deployment in ('lighter-core-mainnet','lighter-rh-mainnet'):
                 counter=NS(identity=Identity(deployment,'123','counter',4),symbol='NVDA')
                 validate_private_pair(spec,counter);validate_private_pair(counter,spec)
                 counter.symbol='ETH'
-                with self.assertRaises(Reject):validate_private_pair(spec,counter)
+                validate_private_pair(spec,counter)  # economic correspondence is operator-owned
             with self.assertRaisesRegex(Reject,'distinct dedicated'):
                 validate_private_pair(spec,NS(identity=native,symbol='io:NVDA'))
             other=NS(identity=Identity('hyperliquid-mainnet-native',spec.identity.account,'0x'+'22'*20),symbol='NVDA')
-            with self.assertRaises(Reject):validate_private_pair(spec,other)
+            validate_private_pair(spec,other)
             with self.assertRaises(Reject):_binding('entropy-mainnet-io',spec.identity.signer,None,'01'*32)
             with self.assertRaises(Reject):Identity('entropy-mainnet-io',spec.identity.account,spec.identity.signer,4)
             self.assertNotEqual(spec.identity.nonce_scope,native.nonce_scope)
@@ -406,7 +408,7 @@ class EntropyPrivateTests(unittest.TestCase):
             validate_public(c,reader=lambda s:(entropy if s.symbol=='io:NVDA' else counter,book,{}))
             result=status(Path(root)/'absent')
             self.assertFalse(result['trading_enabled']);self.assertFalse(result['actual_accounts_read'])
-            self.assertEqual(result['private_capabilities']['entropy-mainnet-io']['reviewed_symbol'],'io:NVDA')
+            self.assertIn('fresh exact io metadata',result['private_capabilities']['entropy-mainnet-io']['market_scope'])
             self.assertFalse(result['private_capabilities']['entropy-mainnet-io']['account_acceptance_verified'])
 
     def test_spawned_real_sdk_session_worker_both_legs_partial_then_one_equal_ioc(self):

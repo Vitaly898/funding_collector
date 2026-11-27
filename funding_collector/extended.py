@@ -10,6 +10,18 @@ SDK_REVISION = 'da9a79726d23fb605518348dd6f4fa7d3dbd83c9'
 BASE_URL = 'https://api.starknet.extended.exchange/api/v1'
 
 
+def private_market(raw):
+    """Canonical private base scope with the venue's real synthetic asset ID."""
+    market=normalize_market(raw)
+    value=raw['l2Config']['syntheticId']
+    if not isinstance(value,str) or not re.fullmatch(r'0x[0-9a-fA-F]{1,64}',value):
+        raise Reject('Extended exact synthetic asset ID required')
+    market.symbol=market.base_asset
+    market.market_id=int(value,16)
+    if not 0<market.market_id<2**251:raise Reject('Extended synthetic ID outside field')
+    return market
+
+
 def normalize_market(raw):
     if (raw.get('type') != 'PERPETUAL' or raw.get('active') is not True
             or raw.get('status') != 'ACTIVE' or raw.get('isRfq') is not False

@@ -6,7 +6,7 @@ reuse this key with native HL or any other app. No registration/approval API.
 """
 import time
 from .domain import Reject
-from .entropy import EntropyInstrument, USDC_TOKEN_ID
+from .entropy import EntropyInstrument, USDC_TOKEN_ID, contract_identity
 from .live_hyperliquid import HyperliquidPrivate
 
 AGENT_NAME='funding-collector:entropy:io'
@@ -19,16 +19,16 @@ class EntropyPrivate(HyperliquidPrivate):
 
     def __init__(self, exchange, info, identity, market, authority, journal):
         raw=market.raw
-        if (market.symbol!='io:NVDA' or market.base_asset!='NVDA'
-                or raw.get('dex')!='io' or raw.get('coin')!='io:NVDA'
-                or raw.get('underlying_id')!='equity:US:NVDA'
+        if (market.base_asset!=market.symbol.removeprefix('io:')
+                or raw.get('dex')!='io' or raw.get('coin')!=market.symbol
+                or raw.get('underlying_id')!=contract_identity(market.symbol)
                 or raw.get('collateral_asset')!='USDC'
                 or raw.get('collateral_token_id')!=USDC_TOKEN_ID
                 or not raw.get('units_verified') or raw.get('is_delisted')
                 or type(raw.get('dex_index')) is not int or raw['dex_index']<1
                 or type(raw.get('index_in_meta')) is not int or not 0<=raw['index_in_meta']<10000
                 or market.market_id!=100000+raw['dex_index']*10000+raw['index_in_meta']):
-            raise Reject('Entropy exact io:NVDA metadata/collateral scope required')
+            raise Reject('Entropy exact io contract metadata/collateral scope required')
         super().__init__(exchange,info,identity,market,authority,journal)
 
     async def registration(self):
@@ -61,5 +61,5 @@ class EntropyPrivate(HyperliquidPrivate):
         return rows
 
     # Official orderStatus and userFills have no dex selector. The inherited
-    # implementations require exact io:NVDA for every matched cloid/order ID,
-    # require USDC fees, reject incomplete history and never fall back to NVDA.
+    # implementations require the exact scoped symbol for every matched cloid/order ID,
+    # require USDC fees, reject incomplete history and never fall back to native.

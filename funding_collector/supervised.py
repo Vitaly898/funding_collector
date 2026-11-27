@@ -19,7 +19,8 @@ FIELDS={'identity','symbol','asset_id','max_quantity','max_notional','max_slippa
 INTENT={'id','quantity','side','primary_price','hedge_price','primary_reference','hedge_reference'}
 PRIVATE_CAPABILITIES={'entropy-mainnet-io':dict(
     implementation='official HL SDK scoped bridge; local supervised CLI only',
-    dex='io',reviewed_symbol='io:NVDA',countervenues=['lighter-core-mainnet','lighter-rh-mainnet'],
+    dex='io',market_scope='fresh exact io metadata; venue contract units, not spot shares',
+    countervenues=['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet','aster-mainnet','extended-mainnet-starknet'],
     order_modes=['LIMIT_POST_ONLY','PROTECTED_MARKET_IOC'],automatic_wallet_sharing=False,
     dedicated_agent_name='funding-collector:entropy:io',registration_protocol_scope='owner account; NOT dex-limited',
     account_acceptance_verified=False)}
@@ -140,7 +141,7 @@ def validate_public(c, *, reader=None):
     for n,spec in enumerate(c.specs):
         sample=(reader or public_snapshot)(spec);market=sample[0]
         markets.append(market)
-        base='NVDA' if spec.identity.deployment=='entropy-mainnet-io' and spec.symbol=='io:NVDA' else spec.symbol
+        base=spec.symbol.removeprefix('io:') if spec.identity.deployment=='entropy-mainnet-io' else spec.symbol
         if ((market.symbol,market.market_id)!=(spec.symbol,spec.asset_id)
                 or market.base_asset!=base or market.quote_asset!='USD'
                 or market.quantity_unit!='base' or market.contract_type!='linear_perpetual'
@@ -155,9 +156,11 @@ def validate_public(c, *, reader=None):
         entries=[]
         for spec,market in zip(c.specs,markets):
             dep=spec.identity.deployment
-            entropy=dep=='entropy-mainnet-io'
-            deployment=Deployment('hyperliquid-mainnet-io' if entropy else 'rh' if dep=='lighter-rh-mainnet' else 'core',
-                                  'entropy' if entropy else 'lighter')
+            name,venue={'entropy-mainnet-io':('hyperliquid-mainnet-io','entropy'),
+                'hyperliquid-mainnet-native':('hyperliquid-mainnet-native','hyperliquid'),
+                'lighter-core-mainnet':('core','lighter'),'lighter-rh-mainnet':('rh','lighter'),
+                'aster-mainnet':('aster-mainnet-v3','aster'),'extended-mainnet-starknet':('starknet-mainnet','extended')}[dep]
+            deployment=Deployment(name,venue)
             entries.append((Connection(dep,deployment,'private-explicit','private-explicit'),market))
         validate_pair(entries)
 
