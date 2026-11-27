@@ -42,7 +42,11 @@ function createClient({fetch:fetcher=root.fetch.bind(root),onAuth=()=>{}}={}){
   if(!authenticated)throw Error('AUTH_REQUIRED');
   return request('/api/live/'+action,body);
  }
- return {bootstrap,login,logout,status,mutate,get authenticated(){return authenticated;},get generation(){return generation;}};
+ async function markets(deployment){
+  if(!authenticated)throw Error('AUTH_REQUIRED');
+  return request('/api/live/markets/'+encodeURIComponent(deployment));
+ }
+ return {bootstrap,login,logout,status,mutate,markets,get authenticated(){return authenticated;},get generation(){return generation;}};
 }
 function createMarketLoader({client,onChange}){
  const flights=new Map(),versions=[0,0];let epoch=0;
@@ -50,18 +54,14 @@ function createMarketLoader({client,onChange}){
  async function load(n,deployment){
   const version=++versions[n],session=epoch;
   onChange(n,{status:'loading',rows:[]});
-  const lighter=deployment.startsWith('lighter-');
-  // The public API returns a compatible pair catalog. Use a fixed public
-  // companion for each venue; the other selected leg must not gate this list.
-  // Actual selected-pair compatibility/fresh IDs are still checked by quote.
-  const pair={primary:lighter?'hyperliquid-mainnet-native':deployment,hedge:lighter?deployment:'lighter-core-mainnet'};
-  const key=JSON.stringify(pair);
+  // Only this venue is read. Pair compatibility remains quote's responsibility.
+  const key=deployment;
   let pending=flights.get(key);
-  if(!pending){pending=client.mutate('markets',pair);flights.set(key,pending);}
+  if(!pending){pending=client.markets(deployment);flights.set(key,pending);}
   try{
    const result=await pending;
    if(session!==epoch||version!==versions[n])return;
-   const rows=result.markets[lighter?1:0];
+   const rows=result.markets;
    onChange(n,{status:rows.length?'ready':'empty',rows});
   }catch(error){if(session===epoch&&version===versions[n])onChange(n,{status:'error',rows:[]});}
   finally{if(flights.get(key)===pending)flights.delete(key);}

@@ -64,6 +64,45 @@ class MarketDirectory:
         return dict(symbol=market.symbol,asset_id=market.market_id,size_step=str(market.size_step),
                     price_step=str(market.price_step),min_size=str(market.min_size),min_notional=str(market.min_quote))
 
+    @staticmethod
+    def _listings(deployment, data):
+        rows=[]
+        if deployment in (HL,ENT):
+            for row in data['markets']:
+                symbol=row.get('coin','')
+                supported=bool(row.get('units_verified') and not row.get('is_delisted') and (deployment==HL or symbol=='io:NVDA'))
+                rows.append(dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
+                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
+                    reason='' if supported else 'Снят биржей с торгов' if row.get('is_delisted') else 'Entropy LIVE: только io:NVDA' if deployment==ENT and symbol!='io:NVDA' else 'Не поддерживается приложением: инструмент не проверен'))
+        else:
+            from .public import resolve_market
+            for row in data['order_book_details']:
+                symbol=row.get('symbol','');supported=False
+                try:
+                    market=resolve_market(data,symbol)
+                    supported=market.multiplier==1 and market.units_verified
+                except (Reject,KeyError,TypeError,ValueError):pass
+                rows.append(dict(symbol=symbol,label=symbol,base=row.get('base_asset',symbol),
+                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
+                    reason='' if supported else 'Не поддерживается: неактивный контракт или непроверенные тип/единицы metadata'))
+        return rows
+
+    def venue(self, deployment):
+        if deployment not in (HL,ENT,*LIGHTER):
+            raise Reject('unsupported directory deployment')
+        try:
+            adapter=self._adapter(deployment)
+            if deployment in (HL,ENT):
+                data=adapter.catalog()
+                observed=fresh(data['observed_at_unix_s'])
+            else:
+                data,at=adapter.client.get('orderBookDetails')
+                observed=fresh(at)
+            return dict(deployment=deployment,markets=self._listings(deployment,data),
+                        observed_at=observed,max_age_seconds=MAX_AGE)
+        except Exception:
+            raise Reject('public metadata unavailable or unverified; no fallback') from None
+
     def catalog(self, primary, hedge):
         self.deployments(primary,hedge)
         try:
@@ -88,23 +127,8 @@ class MarketDirectory:
                 except (Reject,KeyError,TypeError,ValueError):continue
             # A base must resolve unambiguously, never pick the first duplicate.
             pairs=[p for p in pairs if sum(x['base']==p['base'] for x in pairs)==1]
-            native_rows=[];light_rows=[]
-            for row in catalog['markets']:
-                symbol=row.get('coin','')
-                supported=bool(row.get('units_verified') and not row.get('is_delisted') and (native==HL or symbol=='io:NVDA'))
-                native_rows.append(dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
-                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Снят биржей с торгов' if row.get('is_delisted') else 'Entropy LIVE: только io:NVDA' if native==ENT and symbol!='io:NVDA' else 'Не поддерживается приложением: инструмент не проверен'))
-            for row in raw['order_book_details']:
-                symbol=row.get('symbol','');supported=False
-                try:
-                    from .public import resolve_market
-                    market=resolve_market(raw,symbol)
-                    supported=market.multiplier==1 and market.units_verified
-                except (Reject,KeyError,TypeError,ValueError):pass
-                light_rows.append(dict(symbol=symbol,label=symbol,base=row.get('base_asset',symbol),
-                    units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Не поддерживается: неактивный контракт или непроверенные тип/единицы metadata'))
+            native_rows=self._listings(native,catalog)
+            light_rows=self._listings(light,raw)
             listings=[native_rows,light_rows] if primary==native else [light_rows,native_rows]
             return dict(primary=primary,hedge=hedge,pairs=sorted(pairs,key=lambda p:p['base']),markets=listings,
                         observed_at=observed,max_age_seconds=MAX_AGE,

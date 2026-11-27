@@ -20,7 +20,11 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     errors, requests, checks = [], [], []
+    reads, down = [], set()
     def listings(root, deployment):
+        reads.append(deployment)
+        if deployment in down:
+            raise OSError('synthetic selected venue down')
         adapter = adapters(root, deployment)
         if deployment == 'hyperliquid-mainnet-native':
             original = adapter.catalog
@@ -74,20 +78,39 @@ def main():
                 expect(page.locator('#pair-select-1 option[value=ETH]')).to_have_count(1)
                 expect(page.locator('#pair-select-0')).to_have_value('ETH')
                 checks.append('venue change clears quote/changed selection, preserves other leg')
+                # Real backend failure, not a forged browser response: an unselected
+                # Core outage must not prevent native HL or RH metadata reads.
+                down.add('lighter-core-mainnet');reads.clear()
+                page.locator('#primary-deployment').select_option('entropy-mainnet-io')
+                expect(page.locator('#retry-markets-0')).to_be_visible()
+                page.locator('#primary-deployment').select_option('hyperliquid-mainnet-native')
+                expect(page.locator('#pair-select-0 option[value=ETH]')).to_have_count(1)
+                assert 'lighter-core-mainnet' not in reads
+                page.locator('#pair-select-0').select_option('ETH')
+                page.locator('#hedge-deployment').select_option('lighter-core-mainnet')
+                expect(page.locator('#retry-markets-1')).to_be_visible()
+                expect(page.locator('#pair-select-0')).to_have_value('ETH')
+                page.screenshot(path=str(out / 'selected-venue-failure.png'), full_page=True)
+                reads.clear()
+                page.locator('#hedge-deployment').select_option('lighter-rh-mainnet')
+                expect(page.locator('#pair-select-1 option[value=ETH]')).to_have_count(1)
+                assert reads == ['lighter-rh-mainnet']
+                down.clear()
+                checks.append('real backend: Core outage does not gate HL/RH; selected failure preserves other leg')
                 page.locator('#pair-select-1').select_option('ETH')
                 page.locator('#quote').click()
                 expect(page.locator('#save-config')).to_be_enabled()
                 # Primary-leg venue changes use their own list, not the hedge's.
                 def entropy_list(route):
-                    route.fulfill(status=200, json={'markets': [[{'symbol': 'io:NVDA', 'label': 'io:NVDA', 'base': 'NVDA', 'units': 'base', 'supported': True}], []]})
-                page.route('**/api/live/markets', entropy_list)
+                    route.fulfill(status=200, json={'markets': [{'symbol': 'io:NVDA', 'label': 'io:NVDA', 'base': 'NVDA', 'units': 'base', 'supported': True}]})
+                page.route('**/api/live/markets/*', entropy_list)
                 page.locator('#primary-deployment').select_option('entropy-mainnet-io')
                 expect(page.locator('#pair-select-0 option[value="io:NVDA"]')).to_have_count(1)
                 expect(page.locator('#pair-select-0')).to_have_value('')
                 expect(page.locator('#pair-select-1')).to_have_value('ETH')
                 expect(page.locator('#save-config')).to_be_disabled()
                 expect(page.locator('#farming-enabled')).to_be_disabled()
-                page.unroute('**/api/live/markets', entropy_list)
+                page.unroute('**/api/live/markets/*', entropy_list)
                 page.locator('#primary-deployment').select_option('hyperliquid-mainnet-native')
                 expect(page.locator('#pair-select-0 option[value=ETH]')).to_have_count(1)
                 page.locator('#pair-select-0').select_option('ETH')
@@ -95,23 +118,23 @@ def main():
                 # Error/empty are exceptional retry paths, never the normal load step.
                 def unavailable(route):
                     route.fulfill(status=503, json={'error': 'public_unavailable'})
-                page.route('**/api/live/markets', unavailable)
+                page.route('**/api/live/markets/*', unavailable)
                 page.locator('#hedge-deployment').select_option('lighter-core-mainnet')
                 expect(page.locator('#retry-markets-1')).to_be_visible()
                 expect(page.locator('#pair-select-1')).to_be_disabled()
                 expect(page.locator('#pair-select-1')).to_have_value('')
                 expect(page.locator('#market-state-1')).to_contain_text('Не удалось')
-                page.unroute('**/api/live/markets', unavailable)
+                page.unroute('**/api/live/markets/*', unavailable)
                 page.locator('#retry-markets-1').click()
                 expect(page.locator('#pair-select-1')).to_be_enabled()
                 expect(page.locator('#retry-markets-1')).to_be_hidden()
                 def empty(route):
-                    route.fulfill(status=200, json={'markets': [[], []]})
-                page.route('**/api/live/markets', empty)
+                    route.fulfill(status=200, json={'markets': []})
+                page.route('**/api/live/markets/*', empty)
                 page.locator('#hedge-deployment').select_option('lighter-rh-mainnet')
                 expect(page.locator('#market-state-1')).to_contain_text('пустой список')
                 expect(page.locator('#retry-markets-1')).to_be_visible()
-                page.unroute('**/api/live/markets', empty)
+                page.unroute('**/api/live/markets/*', empty)
                 page.locator('#retry-markets-1').click()
                 expect(page.locator('#pair-select-1')).to_be_enabled()
                 checks.append('public failure/empty clear old rows and expose working per-leg retry')
@@ -119,16 +142,16 @@ def main():
                 pending = []
                 def delayed(route):
                     pending.append(route)
-                page.route('**/api/live/markets', delayed)
+                page.route('**/api/live/markets/*', delayed)
                 page.locator('#hedge-deployment').select_option('lighter-core-mainnet')
                 expect(page.locator('#pair-select-1')).to_be_disabled()
                 expect(page.locator('#pair-select-1')).to_contain_text('Загрузка инструментов…')
                 page.wait_for_function('document.querySelector("#pair-select-1").disabled')
                 assert len(pending) == 1
-                page.unroute('**/api/live/markets', delayed)
+                page.unroute('**/api/live/markets/*', delayed)
                 page.locator('#hedge-deployment').select_option('lighter-rh-mainnet')
                 expect(page.locator('#pair-select-1 option[value=ETH]')).to_have_count(1)
-                pending[0].fulfill(status=200, json={'markets': [[], [{'symbol': 'STALE', 'label': 'STALE', 'supported': True}]]})
+                pending[0].fulfill(status=200, json={'markets': [{'symbol': 'STALE', 'label': 'STALE', 'supported': True}]})
                 # A browser task turn lets the old fetch continuation run.
                 page.evaluate('()=>new Promise(resolve=>setTimeout(resolve,50))')
                 expect(page.locator('#pair-select-1 option[value=STALE]')).to_have_count(0)
@@ -148,11 +171,11 @@ def main():
                     # with a still-valid server cookie is not session expiry.
                     server.sessions.revoke()
                     route.continue_()
-                page.route('**/api/live/markets', expired)
+                page.route('**/api/live/markets/*', expired)
                 page.locator('#hedge-deployment').select_option('lighter-core-mainnet')
                 expect(page.locator('#workspace')).to_be_hidden()
                 expect(page.locator('#strategy-modal')).not_to_be_visible()
-                page.unroute('**/api/live/markets', expired)
+                page.unroute('**/api/live/markets/*', expired)
                 page.locator('#login [name=password]').fill('synthetic-owner-password')
                 page.locator('#login button').click()
                 expect(page.locator('#workspace')).to_be_visible()
@@ -160,7 +183,7 @@ def main():
                 expect(page.locator('#pair-select-0 option[value=ETH]')).to_have_count(1)
                 expect(page.locator('#pair-select-1 option[value=ETH]')).to_have_count(1)
                 pending.clear()
-                page.route('**/api/live/markets', delayed)
+                page.route('**/api/live/markets/*', delayed)
                 page.locator('#hedge-deployment').select_option('lighter-rh-mainnet')
                 expect(page.locator('#pair-select-1')).to_be_disabled()
                 assert len(pending) == 1
@@ -170,7 +193,7 @@ def main():
                 assert refreshed.value.status == 200
                 page.evaluate('()=>new Promise(resolve=>setTimeout(resolve,50))')
                 expect(page.locator('#workspace')).to_be_hidden()
-                page.unroute('**/api/live/markets', delayed)
+                page.unroute('**/api/live/markets/*', delayed)
                 page.locator('#login [name=password]').fill('synthetic-owner-password')
                 page.locator('#login button').click()
                 expect(page.locator('#workspace')).to_be_visible()

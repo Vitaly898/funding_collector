@@ -180,6 +180,11 @@ class LiveService:
             finally:path.unlink(missing_ok=True)
             return self.status()
 
+    def venue_markets(self, deployment):
+        self._ensure_open()
+        from .live_markets import MarketDirectory
+        return MarketDirectory(self._root/'market-directory').venue(deployment)
+
     def markets(self, primary, hedge):
         self._ensure_open()
         from .live_markets import MarketDirectory

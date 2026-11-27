@@ -132,6 +132,19 @@ class Handler(BaseHTTPRequestHandler):
             # Revoked tokens are unusable. Do not emit a delayed cookie deletion
             # that could overwrite a newer login's HttpOnly session cookie.
             return self.reply(200,dict(authenticated=False,csrf_token='',configured=True))
+        if self.command=='GET' and path.startswith('/api/live/markets/'):
+            deployment=path.removeprefix('/api/live/markets/')
+            if not deployment or '/' in deployment or '?' in deployment:
+                return self.reply(404,{'error':'not_found'})
+            token=self.token('fc_session')
+            refused=False;result=None
+            try:result=s.service.venue_markets(deployment)
+            except Reject:refused=True
+            # Fence failures too: expiry/logout takes precedence over read errors.
+            if s.sessions.validate(token)!=csrf:
+                return self.reply(401,{'error':'authentication_required'})
+            if refused:return self.reply(409,{'error':'operation_refused'})
+            return self.reply(200,result)
         if self.command=='GET' and path=='/api/live/status':return self.reply(200,s.service.status())
         operations={
             '/api/live/markets':('markets',{'primary','hedge'}),
