@@ -26,10 +26,9 @@ def adapters(root, deployment):
     return SimpleNamespace(client=SimpleNamespace(get=lambda route: (dict(code=200,order_book_details=[light]),now)),
         snapshot=lambda symbol:(Market(light),book(now),{}))
 
-def test_catalog_distinguishes_delisted_from_app_limit_without_enabling_unreviewed(tmp_path):
+def test_catalog_distinguishes_delisted_from_invalid_units_without_enabling_unverified(tmp_path):
     from funding_collector.live_markets import MarketDirectory
-    from funding_collector.hyperliquid import resolve_contract, REVIEWED_CRYPTO
-    assert set(REVIEWED_CRYPTO) == {'BTC', 'ETH', 'SOL'}
+    from funding_collector.hyperliquid import resolve_contract
     def listings(root, dep):
         adapter = adapters(root, dep)
         if dep == HL:
@@ -48,7 +47,7 @@ def test_catalog_distinguishes_delisted_from_app_limit_without_enabling_unreview
         ('DOGE', False, 'Не поддерживается приложением: инструмент не проверен'),
         ('OLD', False, 'Снят биржей с торгов'),
     ]
-    for coin in ('BTC', 'ETH', 'SOL'):
+    for coin in ('BTC', 'ETH', 'SOL', 'DOGE'):
         # The source resolver, not the dropdown, owns the reviewed-unit guard.
         assert resolve_contract(native_meta(coin), native_spot(), coin)['units_verified']
 

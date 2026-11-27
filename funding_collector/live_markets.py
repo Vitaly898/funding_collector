@@ -91,20 +91,20 @@ class MarketDirectory:
             native_rows=[];light_rows=[]
             for row in catalog['markets']:
                 symbol=row.get('coin','')
-                supported=bool(row.get('units_verified') and not row.get('is_delisted'))
+                supported=bool(row.get('units_verified') and not row.get('is_delisted') and (native==HL or symbol=='io:NVDA'))
                 native_rows.append(dict(symbol=symbol,label=symbol,base=symbol.removeprefix('io:'),
                     units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Снят биржей с торгов' if row.get('is_delisted') else 'Не поддерживается приложением: инструмент не проверен'))
+                    reason='' if supported else 'Снят биржей с торгов' if row.get('is_delisted') else 'Entropy LIVE: только io:NVDA' if native==ENT and symbol!='io:NVDA' else 'Не поддерживается приложением: инструмент не проверен'))
             for row in raw['order_book_details']:
                 symbol=row.get('symbol','');supported=False
                 try:
                     from .public import resolve_market
                     market=resolve_market(raw,symbol)
-                    supported=symbol in ('BTC','ETH','SOL','NVDA') and market.multiplier==1
+                    supported=market.multiplier==1 and market.units_verified
                 except (Reject,KeyError,TypeError,ValueError):pass
                 light_rows.append(dict(symbol=symbol,label=symbol,base=row.get('base_asset',symbol),
                     units='base · multiplier 1' if supported else 'непроверенные единицы',supported=supported,
-                    reason='' if supported else 'Live engine: только проверенные BTC/ETH/SOL/NVDA, active linear perp'))
+                    reason='' if supported else 'Не поддерживается: неактивный контракт или непроверенные тип/единицы metadata'))
             listings=[native_rows,light_rows] if primary==native else [light_rows,native_rows]
             return dict(primary=primary,hedge=hedge,pairs=sorted(pairs,key=lambda p:p['base']),markets=listings,
                         observed_at=observed,max_age_seconds=MAX_AGE,

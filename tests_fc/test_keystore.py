@@ -40,7 +40,9 @@ class KeystoreTests(unittest.TestCase):
             import hashlib
             i=Identity('lighter-core-mainnet','123',hashlib.sha256(bytes.fromhex('01'*40)).hexdigest(),4)
             k=KeyStore(Path(root)/'vault');k.create(i,'01'*40,'dummy-only-passphrase-2026')
-            p=k.root/'key.json';raw=json.loads(p.read_text());raw['ciphertext']='00'+raw['ciphertext'][2:]
+            p=k.root/'key.json';raw=json.loads(p.read_text())
+            # Always change a bit; replacing with 00 was a probabilistic no-op.
+            raw['ciphertext']=format(int(raw['ciphertext'][:2],16)^1,'02x')+raw['ciphertext'][2:]
             p.write_text(json.dumps(raw))
             with self.assertRaises(Reject):k.unlock(i,'dummy-only-passphrase-2026',lifetime=30)
             p.unlink();p.symlink_to(Path(root)/'elsewhere')

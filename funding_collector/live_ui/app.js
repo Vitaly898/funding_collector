@@ -210,7 +210,7 @@ function render(row){
  const out=$('ledger');out.replaceChildren();const s=row.state;
  if(!s){out.textContent='Нет сохранённой задачи. Здесь появятся подтверждённые сделки, комиссии и журнал.';return;}
  const title=document.createElement('h3');title.textContent=strategyName(s.intent?.id)+' · '+statusText(s.status);out.append(title);
- const p=document.createElement('p');p.textContent='Исполнено на первой: '+s.primary_filled+' · на второй: '+s.hedge_filled+' · Незахеджированный остаток '+s.residual_base+' · Комиссии '+Object.entries(s.fees_by_currency||{}).map(([k,v])=>v+' '+k).join(', ');out.append(p);
+ const p=document.createElement('p');p.textContent='Исполнено на первой: '+s.primary_filled+' · на второй: '+s.hedge_filled+' · Разница исполненных количеств (не оценка риска) '+s.residual_base+' · Комиссии '+Object.entries(s.fees_by_currency||{}).map(([k,v])=>v+' '+k).join(', ');out.append(p);
  if(s.farming){
   const f=s.farming,info=document.createElement('p');info.id='farming-progress';
   const phases={OPENING:'Открытие',HOLDING:'Удержание',CLOSING_PRIMARY:'Закрытие первой ноги',CLOSING_HEDGE:'Закрытие второй ноги',DELAY:'Пауза между циклами',DONE:'Обе ноги закрыты'};

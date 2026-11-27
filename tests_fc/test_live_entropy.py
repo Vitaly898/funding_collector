@@ -209,7 +209,9 @@ class EntropyPrivateTests(unittest.TestCase):
                 raw=dict(symbol='NVDA',market_id=1,market_type='perp',status='active',supported_size_decimals=3,
                     supported_price_decimals=2,min_base_amount='.001',min_quote_amount='10')
                 if fault in ('AAPL','TSLA','DOGE','io:NVDA'):
-                    spec=replace(spec,symbol=fault);raw['symbol']=fault
+                    # These are now valid standalone symbols, but not the
+                    # selected NVDA scope: metadata substitution must fail.
+                    raw['symbol']=fault
                 if fault=='base':raw['base_asset']='AAPL'
                 if fault=='asset':raw['market_id']=2
                 if fault in ('multiplier','quote_multiplier'):raw[fault]='100'
@@ -290,7 +292,7 @@ class EntropyPrivateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             spec,_=scope(root)
             native=Identity('hyperliquid-mainnet-native',spec.identity.account,spec.identity.signer)
-            for dep,symbol in ((spec.identity,'NVDA'),(spec.identity,'io:AAPL'),(native,'NVDA'),(native,'io:NVDA')):
+            for dep,symbol in ((spec.identity,'NVDA'),(spec.identity,'io:AAPL'),(native,'@NVDA'),(native,'io:NVDA')):
                 with self.subTest(symbol=symbol),self.assertRaises(Reject):Authority(dep,symbol,1,'1','500','50')
             for deployment in ('lighter-core-mainnet','lighter-rh-mainnet'):
                 counter=NS(identity=Identity(deployment,'123','counter',4),symbol='NVDA')

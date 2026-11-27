@@ -6,21 +6,30 @@ contract/lot conversion, and rejects contradictory metadata explicitly.
 """
 from decimal import Decimal
 import time
+import re
 
 from .domain import Instrument, Book, Reject, number
 
 
 def normalize_market(raw):
+    symbol=raw.get('symbol')
+    if not isinstance(symbol,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,29}',symbol):
+        raise Reject('exact bounded Lighter market symbol required')
     if raw.get('market_type') != 'perp' or raw.get('status') != 'active':
         raise Reject('only active perpetual markets supported')
     if raw.get('is_frozen') or raw.get('market_config', {}).get('force_reduce_only'):
         raise Reject('market frozen or reduce-only')
     if number(raw.get('quote_multiplier', '1')) != 1:
         raise Reject('non-unit quote multiplier unsupported')
-    size_decimals, price_decimals = int(raw['supported_size_decimals']), int(raw['supported_price_decimals'])
+    def integer(value):
+        if type(value) is int and value>=0:return value
+        if isinstance(value,str) and value.isascii() and value.isdigit() and str(int(value))==value:return int(value)
+        raise Reject('canonical nonnegative integer metadata required')
+    size_decimals, price_decimals = integer(raw['supported_size_decimals']), integer(raw['supported_price_decimals'])
+    market_id=integer(raw['market_id'])
     if not 0 <= size_decimals <= 18 or not 0 <= price_decimals <= 18:
         raise Reject('unsupported decimal precision')
-    return Instrument(raw['symbol'], int(raw['market_id']), raw.get('base_asset', raw['symbol']),
+    return Instrument(raw['symbol'], market_id, raw.get('base_asset', raw['symbol']),
                       raw.get('quote_asset', 'USD'), raw.get('contract_type', 'linear_perpetual'),
                       raw.get('quantity_unit', 'base'), raw.get('multiplier', '1'), True,
                       Decimal(10) ** -size_decimals, Decimal(10) ** -price_decimals,

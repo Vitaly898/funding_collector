@@ -57,13 +57,19 @@ def validate_private_pair(first, second):
     a,b=first.identity,second.identity
     if a.signer.lower()==b.signer.lower():
         raise Reject('distinct dedicated execution keys required for each venue')
-    if 'entropy-mainnet-io' in (a.deployment,b.deployment) or any(v.symbol in ('NVDA','io:NVDA') for v in (first,second)):
+    if 'entropy-mainnet-io' in (a.deployment,b.deployment):
         entropy=[v for v in (first,second) if v.identity.deployment=='entropy-mainnet-io' and v.symbol=='io:NVDA']
         counter=[v for v in (first,second) if v.identity.deployment in ('lighter-core-mainnet','lighter-rh-mainnet') and v.symbol=='NVDA']
         if len(entropy)!=1 or len(counter)!=1:
             raise Reject('only reviewed Entropy io:NVDA versus Core/RH NVDA private pair allowed')
-    elif a.deployment==b.deployment or first.symbol!=second.symbol:
-        raise Reject('distinct deployments and exact base pair required')
+    elif a.deployment==b.deployment:
+        raise Reject('distinct deployments required')
+    elif all(v in ('hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet') for v in (a.deployment,b.deployment)):
+        # Exact market scopes are checked independently against public metadata.
+        # Different/same tickers imply no economic matching guarantee.
+        return
+    elif first.symbol!=second.symbol:
+        raise Reject('exact base pair required for this adapter combination')
 
 
 @dataclass(frozen=True)
@@ -98,11 +104,10 @@ class Authority:
     _until: float = field(default=0,init=False,repr=False)
 
     def __post_init__(self):
-        allowed=(('io:NVDA',) if self.identity.deployment=='entropy-mainnet-io' else
-                 ('BTC','ETH','SOL','NVDA') if self.identity.deployment in ('lighter-core-mainnet','lighter-rh-mainnet') else
-                 ('BTC','ETH','SOL'))
-        if self.symbol not in allowed or type(self.asset_id) is not int or self.asset_id < 0:
-            raise Reject('only exact reviewed native base markets allowed')
+        dynamic=self.identity.deployment in ('hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet')
+        valid_symbol=isinstance(self.symbol,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,29}',self.symbol) if dynamic else self.symbol in (('io:NVDA',) if self.identity.deployment=='entropy-mainnet-io' else ('BTC','ETH','SOL'))
+        if not valid_symbol or type(self.asset_id) is not int or self.asset_id < 0:
+            raise Reject('exact bounded market symbol and metadata asset id required')
         for key in ('max_quantity','max_notional','max_slippage_bps'):
             setattr(self,key,number(getattr(self,key),True))
         if self.max_slippage_bps > 100:

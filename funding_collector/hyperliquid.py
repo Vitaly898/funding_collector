@@ -14,7 +14,7 @@ class HyperliquidPublicClient(EntropyPublicClient):
                 or payload == {'type':'metaAndAssetCtxs', 'dex':''}
                 or (kind == 'l2Book' and set(payload) == {'type','coin'}
                     and isinstance(payload['coin'], str)
-                    and re.fullmatch(r'[A-Z][A-Z0-9_.-]{0,29}', payload['coin'])))
+                    and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,29}', payload['coin'])))
 
 
 from decimal import Decimal
@@ -26,12 +26,17 @@ DOCS = 'https://hyperliquid.gitbook.io/hyperliquid-docs/'
 SOURCES = [DOCS + p for p in ('trading/contract-specifications',
     'for-developers/api/asset-ids', 'for-developers/api/tick-and-lot-size',
     'for-developers/api/error-responses', 'for-developers/api/info-endpoint/perpetuals')]
-# Deliberately small, explicit spot-base identities. No k/m units, wrappers, aliases.
-REVIEWED_CRYPTO = {'BTC':'crypto:BTC', 'ETH':'crypto:ETH', 'SOL':'crypto:SOL'}
-BASIS_WARNING = ('Official instrument type is linear perpetual, one spot-base unit. '
-    'Oracle prices for reviewed BTC/ETH/SOL are USDT; collateral and PnL settle in USDC '
-    'without USDT/USDC conversion (technically quanto). USD benchmark is nominal only, '
-    'NOT an FX conversion or equal settlement/oracle/funding basis guarantee.')
+# Native universe metadata defines linear perp quantity in the exact named
+# contract-base denomination. kPEPE is NOT silently converted to spot PEPE.
+BASIS_WARNING = ('Native linear perpetual: quantity is in the exact named contract-base units. '
+    'Collateral and PnL settle in USDC; USD benchmark is nominal, no FX conversion. '
+    'A ticker does NOT prove equal spot exposure, oracle, funding or settlement '
+    'on another venue. The operator is responsible for the selected pair.')
+
+def contract_identity(coin):
+    if not isinstance(coin,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,29}',coin):
+        raise Reject('exact native contract symbol required; no spot or HIP3 namespace')
+    return 'hyperliquid-mainnet-native:'+coin
 
 
 def resolve_contract(meta_context, spot, coin):
@@ -58,22 +63,30 @@ def resolve_contract(meta_context, spot, coin):
         decimals = raw['szDecimals']
         if type(decimals) is not int or not 0 <= decimals <= 6:
             raise Reject('unsupported native size precision')
-        verified = coin in REVIEWED_CRYPTO
+        contract_identity(coin)
         leverage = raw.get('maxLeverage')
-        if type(leverage) is not int or leverage <= 0:
-            # Unreviewed catalog entries may omit this; they are never orderable.
-            if verified:
-                raise Reject('missing native leverage/notional constraints')
-            leverage = 1
+        # Incomplete entries remain visible but cannot create an Instrument.
+        verified = type(leverage) is int and leverage > 0 and type(raw.get('isDelisted',False)) is bool
+        try:
+            number(contexts[index]['markPx'],True)
+            if (number(raw.get('multiplier','1'))!=1 or number(raw.get('quote_multiplier','1'))!=1
+                    or raw.get('contract_type','linear_perpetual')!='linear_perpetual'
+                    or raw.get('quantity_unit','base')!='base'
+                    or raw.get('isPreIpo',False) is not False
+                    or raw.get('isPreIPO',False) is not False):
+                verified = False
+        except (KeyError,TypeError,Reject):
+            verified = False
+        if type(leverage) is not int or leverage <= 0:leverage = 1
         max_market = 30000000 if leverage >= 25 else 5000000 if leverage >= 20 else 2000000 if leverage >= 10 else 500000
         return dict(coin=coin, asset_id=index, index_in_meta=index, dex='',
             namespace='hyperliquid-mainnet-native', sz_decimals=decimals,
             size_step=format(Decimal(10) ** -decimals, 'f'),
             collateral_asset='USDC', collateral_token_id=USDC_TOKEN_ID,
-            oracle_price_currency='USDT' if verified else 'UNVERIFIED',
+            oracle_price_currency='venue oracle benchmark; no cross-venue identity inference' if verified else 'UNVERIFIED',
             price_currency='USD nominal benchmark; no FX conversion',
-            price_unit='USDT per spot-base unit' if verified else 'UNVERIFIED_FOR_HEDGE',
-            settlement_basis_warning=BASIS_WARNING, underlying_id=REVIEWED_CRYPTO.get(coin),
+            price_unit='USD nominal per exact native contract-base unit' if verified else 'UNVERIFIED_FOR_HEDGE',
+            settlement_basis_warning=BASIS_WARNING, underlying_id=contract_identity(coin),
             units_verified=verified, multiplier='1' if verified else None,
             is_delisted=raw.get('isDelisted',False), raw=raw, context=contexts[index],
             max_market_notional=str(max_market), max_limit_notional=str(max_market*10),
@@ -87,8 +100,7 @@ class HyperliquidInstrument(Instrument):
     def __init__(self, contract):
         if (contract.get('dex') != '' or contract.get('namespace') != 'hyperliquid-mainnet-native'
                 or not contract.get('units_verified') or contract.get('is_delisted')
-                or contract.get('underlying_id') != REVIEWED_CRYPTO.get(contract.get('coin'))
-                or contract.get('coin') not in REVIEWED_CRYPTO):
+                or contract.get('underlying_id') != contract_identity(contract.get('coin'))):
             raise Reject('native delisted or unverified base identity/namespace')
         self.sz_decimals = contract['sz_decimals']
         super().__init__(contract['coin'],contract['asset_id'],contract['coin'],'USD',
@@ -104,22 +116,22 @@ class HyperliquidInstrument(Instrument):
 
 
 def validate_pair(entries):
-    """Prove equal spot-base exposure only, NOT identical settlement/oracle basis."""
+    """Validate each venue's contract units, never infer economic pair equivalence."""
     native=[(c,m) for c,m in entries if c.deployment.venue=='hyperliquid']
     others=[(c,m) for c,m in entries if c.deployment.venue!='hyperliquid']
     if len(native)!=1 or len(others)!=1:
         raise Reject('native hedge needs one independently verified countervenue')
     hc,hm=native[0];oc,om=others[0]
     if (hc.deployment.id!='hyperliquid-mainnet-native' or not isinstance(hm,HyperliquidInstrument)
-            or hm.symbol not in REVIEWED_CRYPTO or hm.raw.get('dex')!=''
-            or hm.raw.get('underlying_id')!=REVIEWED_CRYPTO[hm.symbol] or hm.raw.get('is_delisted')
-            or om.base_asset!=hm.base_asset or om.quote_asset!='USD'
+            or hm.raw.get('dex')!=''
+            or hm.raw.get('underlying_id')!=contract_identity(hm.symbol) or hm.raw.get('is_delisted')
+            or om.quote_asset!='USD'
             or om.contract_type!='linear_perpetual' or om.quantity_unit!='base'
             or om.multiplier!=1 or not om.units_verified):
         raise Reject('unproven native base identity/units/deployment')
     if oc.deployment.venue=='lighter' and oc.deployment.id in ('core','rh'):
-        if (om.symbol!=hm.symbol or number(om.raw.get('multiplier','0'))!=1
-                or number(om.raw.get('quote_multiplier','0'))!=1):
+        if (om.symbol!=om.raw.get('symbol') or number(om.raw.get('multiplier','1'))!=1
+                or number(om.raw.get('quote_multiplier','1'))!=1):
             raise Reject('native/Core/RH exact symbol or unit multipliers mismatch')
     elif oc.deployment.venue=='extended' and oc.deployment.id=='starknet-mainnet':
         if (om.symbol!=hm.symbol+'-USD' or om.raw.get('assetName')!=hm.symbol
@@ -169,8 +181,7 @@ class HyperliquidPublicAdapter:
             observed_at_unix_s=at,trading_enabled=False,settlement_basis_warning=BASIS_WARNING)
 
     def snapshot(self, symbol):
-        if symbol not in REVIEWED_CRYPTO:
-            raise Reject('native hedge supports exact reviewed BTC/ETH/SOL only; no aliases or HIP3')
+        contract_identity(symbol)
         spot,meta,metadata_at=self._metadata()
         contract=resolve_contract(meta,spot,symbol)
         market=HyperliquidInstrument(contract)
@@ -200,7 +211,7 @@ class HyperliquidPublicAdapter:
             namespace='hyperliquid-mainnet-native',book_observed_at_unix_s=at,
             book_age_seconds_at_preview=time.time()-at,exchange_event_timestamp=event,
             collateral_asset='USDC',collateral_token_id=USDC_TOKEN_ID,
-            oracle_price_currency='USDT',settlement_basis_warning=BASIS_WARNING,
+            oracle_price_currency=contract['oracle_price_currency'],settlement_basis_warning=BASIS_WARNING,
             underlying_id=contract['underlying_id'],price_unit=contract['price_unit'],multiplier='1',
             units_sources=SOURCES,context=contract['context'],funding_interval_seconds=3600,
             freshness_basis='minimum of book event, metadata and conservative HTTP Date/Age; no fallback',
