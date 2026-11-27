@@ -64,6 +64,8 @@ class HyperliquidPrivate:
                     raise Reject('fill market/fee currency mismatch')
                 out.append(dict(id=str(r['tid']),quantity=str(number(r['sz'],True)),
                                 price=str(number(r['px'],True)),fee=str(number(r['fee'])),fee_currency='USDC'))
+                if type(r.get('time')) is int and r['time']>0:
+                    out[-1]['executed_at']=str(number(r['time'])/1000)
         if len({r['id'] for r in out})!=len(out):raise Reject('duplicate fill ids')
         return out
 
@@ -74,7 +76,7 @@ class HyperliquidPrivate:
         self.market.validate(order.quantity,order.price)
         request=dict(coin=self.market.symbol,is_buy=order.side=='buy',sz=float(order.quantity),
                      limit_px=float(order.price),order_type={'limit':{'tif':'Alo' if order.kind=='LIMIT' else 'Ioc'}},
-                     reduce_only=False,cloid=Cloid.from_str(order.client_id))
+                     reduce_only=order.reduce_only,cloid=Cloid.from_str(order.client_id))
         wire=order_request_to_order_wire(request,self.market.market_id)
         if number(wire['s'])!=order.quantity or number(wire['p'])!=order.price:
             raise Reject('SDK float conversion changed exact asset units')

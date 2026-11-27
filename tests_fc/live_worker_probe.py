@@ -24,7 +24,7 @@ class DurableFake(FakeVenue):
             self.orders={o.client_id:o for o in self.calls}
     def save(self):
         raw=dict(fraction=str(self.fraction),result=self.result,
-                 calls=[{k:str(v) for k,v in o.__dict__.items()} for o in self.calls])
+                 calls=[{k:v if type(v) is bool else str(v) for k,v in o.__dict__.items()} for o in self.calls])
         with self.path.open('w') as f:json.dump(raw,f);f.flush();os.fsync(f.fileno())
     async def submit(self,order):
         ack=await super().submit(order);self.save();return ack

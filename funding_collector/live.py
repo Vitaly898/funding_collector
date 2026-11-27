@@ -74,8 +74,11 @@ class Order:
     price: Decimal
     reference_price: Decimal
     kind: str
+    reduce_only: bool = False
 
     def __post_init__(self):
+        if type(self.reduce_only) is not bool or (self.reduce_only and self.kind != 'MARKET'):
+            raise Reject('reduce-only close requires typed protected IOC')
         if (not isinstance(self.client_id,str) or not re.fullmatch(r'0x[0-9a-f]{32}', self.client_id)
                 or self.side not in ('buy','sell') or self.kind not in ('LIMIT','MARKET')):
             raise Reject('typed LIMIT/post-only or protected MARKET/IOC with 128-bit client id required')
@@ -91,6 +94,7 @@ class Authority:
     max_quantity: Decimal
     max_notional: Decimal
     max_slippage_bps: Decimal
+    allow_close: bool = False
     _until: float = field(default=0,init=False,repr=False)
 
     def __post_init__(self):
@@ -122,6 +126,9 @@ class Authority:
             raise Reject('EXECUTION_DISABLED: explicit local runtime arm required')
         if (symbol,asset_id)!=(self.symbol,self.asset_id) or not isinstance(order,Order):
             raise Reject('market or typed intent mismatch')
+        if order.reduce_only and (self.allow_close is not True or self.identity.deployment not in
+                ('hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet')):
+            raise Reject('reduce-only close outside explicit supported scope')
         if order.quantity > self.max_quantity or order.quantity*order.price > self.max_notional:
             raise Reject('quantity/notional scope exceeded')
         if abs(order.price/order.reference_price-1)*10000 > self.max_slippage_bps:

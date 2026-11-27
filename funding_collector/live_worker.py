@@ -32,7 +32,8 @@ class Worker:
         self.armed=False
         self.scope=[dict(identity=asdict(v.identity),symbol=v.market.symbol,asset_id=v.market.market_id,
                          max_quantity=str(v.authority.max_quantity),max_notional=str(v.authority.max_notional),
-                         max_slippage_bps=str(v.authority.max_slippage_bps)) for v in (primary,hedge)]
+                         max_slippage_bps=str(v.authority.max_slippage_bps),
+                         **({'allow_close':True} if v.authority.allow_close else {})) for v in (primary,hedge)]
 
     def __enter__(self):return self
     def __exit__(self,*args):
@@ -136,9 +137,23 @@ class Worker:
             if f['id'] in seen or f['fee_currency']!=expected_currency:raise Reject('invalid fee/fill identity')
             seen.add(f['id']);total+=number(f['quantity'],True)
             number(f['price'],True);number(f['fee'])
+            if 'executed_at' in f:
+                number(f['executed_at'],True)
         previous={f['id']:f for f in s['fills'][label]}
         current={f['id']:f for f in fills}
-        if any(current.get(k)!=v for k,v in previous.items()):raise Reject('fill history lost/changed; reconcile manually')
+        for ident,old in previous.items():
+            new=current.get(ident)
+            # Exchange time is optional metadata, not economic fill identity.
+            # Old durable rows predate timestamp support. Enrich them only after
+            # every immutable field matches; never erase a previously known time.
+            economic=lambda row:{k:v for k,v in row.items() if k!='executed_at'}
+            if new is None or economic(new)!=economic(old):
+                raise Reject('fill history lost/changed; reconcile manually')
+            if 'executed_at' in old:
+                number(old['executed_at'],True)
+                if 'executed_at' in new and number(new['executed_at'],True)!=number(old['executed_at'],True):
+                    raise Reject('fill execution time changed; reconcile manually')
+                new['executed_at']=old['executed_at']
         target=number(s['intent']['quantity'] if label=='primary' else s['primary_filled'])
         if total>target:raise Reject('confirmed order overfill; no automatic flatten')
         s['fills'][label]=fills;s[label+'_filled']=str(total)

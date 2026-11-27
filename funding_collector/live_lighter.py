@@ -120,7 +120,7 @@ class LighterPrivate:
             tx_type,tx_info,tx_hash,error=self.signer.sign_create_order(market_index=self.market.market_id,
                 client_order_index=n,base_amount=int(base),price=int(px),is_ask=order.side=='sell',
                 order_type=0 if order.kind=='LIMIT' else 1,time_in_force=2 if order.kind=='LIMIT' else 0,
-                reduce_only=False,trigger_price=0,order_expiry=-1 if order.kind=='LIMIT' else 0,
+                reduce_only=order.reduce_only,trigger_price=0,order_expiry=-1 if order.kind=='LIMIT' else 0,
                 integrator_account_index=0,integrator_taker_fee=0,integrator_maker_fee=0,
                 self_trade_behavior_mode=0,self_trade_equality_mode=0,skip_nonce=0,
                 nonce=nonce,api_key_index=self.identity.api_key_index)

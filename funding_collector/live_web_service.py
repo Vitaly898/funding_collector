@@ -14,6 +14,29 @@ from .domain import Reject
 WARNING = 'possible_remaining_exposure: lock does not cancel orders or flatten positions'
 
 
+def strategy_analytics(state):
+    """Fill-weighted prices/exposure, never estimated live P&L or zero fees."""
+    from decimal import Decimal
+    from .domain import number
+    result={}
+    for label in ('primary','hedge'):
+        rows=state.get('fills',{}).get(label,[])
+        quantity=sum((number(r['quantity'],True) for r in rows),Decimal(0))
+        notional=sum((number(r['quantity'],True)*number(r['price'],True) for r in rows),Decimal(0))
+        fees={}
+        for r in rows:
+            currency=r['fee_currency']
+            fees[currency]=fees.get(currency,Decimal(0))+number(r['fee'])
+        sign=1 if state['intent']['side']=='buy' else -1
+        if label=='hedge':sign=-sign
+        result[label]=dict(quantity=str(quantity),signed_base=str(quantity*sign if quantity else Decimal(0)),
+            average_price=str(notional/quantity) if quantity else None,
+            fees_by_currency={k:str(v) for k,v in fees.items()} if rows else None,
+            realized_pnl=None,unrealized_pnl=None,funding=None,mark=None,
+            reason='Нет подтверждённых close fills и свежего mark; funding не включён')
+    return result
+
+
 class LiveService:
     def __init__(self, root, *, session_factory=None, public_reader=None):
         self._root = Path(os.path.abspath(root))
@@ -59,7 +82,15 @@ class LiveService:
             db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
             try:
                 row=db.execute('SELECT data FROM tasks ORDER BY rowid DESC LIMIT 1').fetchone()
-                if row:self._state=self._project(json.loads(row[0]),loaded=True)
+                if row:
+                    opened=json.loads(row[0])
+                    if self._config and self._config.farming:
+                        farm=db.execute('SELECT data FROM farming ORDER BY rowid DESC LIMIT 1').fetchone()
+                        if farm:
+                            farming=json.loads(farm[0])
+                            opened=json.loads(db.execute('SELECT data FROM tasks WHERE id=?',(farming['opening_id'],)).fetchone()[0])
+                            self._state=self._project_farming(opened,farming,loaded=True)
+                    else:self._state=self._project(opened,loaded=True)
             finally:db.close()
 
     @staticmethod
@@ -68,12 +99,32 @@ class LiveService:
         from .domain import number
         result={k:s[k] for k in ('status','phase','intent','primary_filled','hedge_filled','residual_base')}
         result['fees_by_currency']={k:str(number(v)) for k,v in s.get('fees_by_currency',{}).items() if k in ('USD','USDC','USDT')}
-        result['fills']={label:[{k:r[k] for k in ('id','quantity','price','fee','fee_currency')} for r in s['fills'][label]] for label in ('primary','hedge')}
+        result['fills']={label:[dict({k:r[k] for k in ('id','quantity','price','fee','fee_currency')},executed_at=r.get('executed_at')) for r in s['fills'][label]] for label in ('primary','hedge')}
+        result['analytics']=strategy_analytics(s)
         result['journal']=[{k:e[k] for k in ('sequence','event','at')} for e in s['journal']]
         if loaded:
             result['observed_at']=s['journal'][-1]['at'] if s['journal'] else None
             result['loaded_at']=time.time()
         else:result['observed_at']=time.time()
+        return result
+
+    @staticmethod
+    def _project_farming(opened,farm,*,loaded=False):
+        from decimal import Decimal
+        from .domain import number
+        result=LiveService._project(opened,loaded=loaded)
+        result.update(intent=dict(farm['intent']),status=farm['status'],phase=farm['phase'],
+                      fees_by_currency=dict(farm['fees_by_currency']),
+                      journal=list(farm['journal']),farming={k:farm[k] for k in
+                        ('cycle','policy','close_fills','hold_deadline','delay_deadline','chosen_delay','turnover_reserved') if k in farm})
+        residual=Decimal(0)
+        for label in ('primary','hedge'):
+            closed=sum((number(f['quantity'],True) for f in farm['close_fills'][label]),Decimal(0))
+            quantity=number(opened[label+'_filled'])-closed
+            sign=(1 if opened['intent']['side']=='buy' else -1)*(1 if label=='primary' else -1)
+            result['analytics'][label].update(quantity=str(quantity),signed_base=str(sign*quantity))
+            residual+=sign*quantity
+        result['residual_base']=str(residual)
         return result
 
     @property
@@ -103,7 +154,7 @@ class LiveService:
             self._ensure_open()
             if self._running or (self._root / 'worker' / 'orders.sqlite3').exists():
                 raise Reject('configuration_locked')
-            if not isinstance(config, dict) or set(config) != {'version','legs','intent','lifetime','poll_seconds'}:
+            if not isinstance(config, dict) or set(config) not in ({'version','legs','intent','lifetime','poll_seconds'}, {'version','legs','intent','lifetime','poll_seconds','farming'}):
                 raise Reject('invalid_config')
             from .supervised import FIELDS, INTENT
             if not isinstance(config['legs'],list) or len(config['legs']) != 2:
@@ -128,6 +179,18 @@ class LiveService:
             except Exception:raise Reject('invalid_config') from None
             finally:path.unlink(missing_ok=True)
             return self.status()
+
+    def markets(self, primary, hedge):
+        self._ensure_open()
+        from .live_markets import MarketDirectory
+        return MarketDirectory(self._root/'market-directory').catalog(primary,hedge)
+
+    def quote(self, primary, hedge, primary_symbol, hedge_symbol, side, offset_pct, protection_bps):
+        self._ensure_open()
+        from .live_markets import MarketDirectory
+        return MarketDirectory(self._root/'market-directory').quote(primary,hedge,
+            primary_symbol=primary_symbol,hedge_symbol=hedge_symbol,
+            side=side,offset_pct=offset_pct,protection_bps=protection_bps)
 
     def _begin(self):
         if not self._operation.acquire(blocking=False):raise Reject('operation_busy')
@@ -234,7 +297,7 @@ class LiveService:
         handoff=[]
         try:
             if confirmation!=ACK:raise Reject('fresh_confirmation_required')
-            if self._state is not None and self._state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED'):raise Reject('task_locked')
+            if self._state is not None and self._state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED','DONE'):raise Reject('task_locked')
             self._fence(epoch)
             self._halt=threading.Event();ready=threading.Event()
             timer=threading.Timer(self._config.lifetime,lambda:self.stop(_timer=timer))
@@ -268,16 +331,27 @@ class LiveService:
         async def run():
             for s in sessions:await s.registration()
             self._fence(epoch)
-            with Worker(self._root/'worker',*sessions) as worker:
-                worker.add(self._config.intent);worker.arm(ACK,lifetime=self._config.lifetime)
+            worker_type=Worker
+            if self._config.farming:
+                from .farming import FarmingWorker
+                worker_type=FarmingWorker
+            with worker_type(self._root/'worker',*sessions) as worker:
+                if self._config.farming: worker.add_farming(self._config.intent,self._config.farming)
+                else: worker.add(self._config.intent)
+                worker.arm(ACK,lifetime=self._config.lifetime)
                 try:
                     while not self._halt.is_set():
                         self._fence(epoch)
                         if not all(s.alive for s in sessions):raise Reject('signer_expired')
-                        state=await worker.tick(self._config.intent['id'])
-                        with self._meta:self._state=self._project(state)
+                        if self._config.farming:
+                            state=await worker.tick_farming(self._config.intent['id'])
+                            projected=self._project_farming(worker.state(state['opening_id']),state)
+                        else:
+                            state=await worker.tick(self._config.intent['id'])
+                            projected=self._project(state)
+                        with self._meta:self._state=projected
                         ready.set()
-                        if state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED'):break
+                        if state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED','DONE'):break
                         await asyncio.to_thread(self._halt.wait,self._config.poll_seconds)
                 finally:worker.armed=False
         try:
@@ -296,13 +370,23 @@ class LiveService:
                     self._running=False;self._enabled=False
             ready.set()
 
+    def _strategies(self):
+        # Current engine owns one persisted config / exclusive worker root.
+        if self._config is None:return []
+        state=self._state
+        return [dict(id=self._config.intent['id'],intent=dict(self._config.intent),
+            status=state['status'] if state else 'CONFIGURED',
+            legs=[dict(deployment=s.identity.deployment,symbol=s.symbol) for s in self._config.specs],
+            analytics=state['analytics'] if state else strategy_analytics(dict(intent=self._config.intent)),
+            observed_at=state.get('observed_at') if state else None)]
+
     def status(self):
         with self._meta:
-            return dict(mode='LIVE', configured=self._config is not None,
+            return dict(mode='LIVE', strategies=self._strategies(), configured=self._config is not None,
                         vaults=[dict(configured=(self._root / f'vault-{n}' / 'key.json').is_file()) for n in range(2)],
                         running=self._running, trading_enabled=self._enabled,
                         checked=self._checked, state=self._state, warning=WARNING,
-                        last_error=self._error)
+                        last_error=self._error, farming=dict(configured=bool(self._config and self._config.farming),policy=self._config.farming if self._config else None, infinite_supported=False, supported_deployments=['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet']))
 
     def stop(self,*,_timer=None):
         with self._meta:
