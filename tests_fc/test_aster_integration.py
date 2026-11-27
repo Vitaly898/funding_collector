@@ -8,13 +8,14 @@ from funding_collector.keystore import _binding,_encode_secret,_decode_secret
 from funding_collector.live import Identity,validate_private_pair
 from funding_collector.signer_session import SessionSpec
 from tests_fc.test_aster import metadata
+from funding_collector.aster import local_market_id
 
 KEY='01'*32
 OWNER='0x'+'11'*20
 
 def scope(root):
  identity=_binding('aster-mainnet',OWNER,None,KEY)
- return SessionSpec(identity,'ETH',1,'.1','500','50',str(Path(root)/'journal'),str(Path(root)/'public'))
+ return SessionSpec(identity,'ETH',local_market_id('ETHUSDT'),'.1','500','50',str(Path(root)/'journal'),str(Path(root)/'public'))
 
 class IntegrationTests(unittest.TestCase):
  def test_identity_custody_and_pair_scope(self):
@@ -26,7 +27,7 @@ class IntegrationTests(unittest.TestCase):
    with self.assertRaises(Reject):Identity('aster-mainnet',OWNER,spec.identity.signer,4)
    counter=SessionSpec(_binding('lighter-core-mainnet','123',4,'02'*40),'ETH',0,'.1','500','50',root,root)
    validate_private_pair(spec,counter)
-   with self.assertRaises(Reject):validate_private_pair(spec,replace(counter,symbol='BTC'))
+   validate_private_pair(spec,replace(counter,symbol='BTC'))  # operator-selected economics
    with self.assertRaises(Reject):validate_private_pair(spec,replace(spec,identity=_binding('aster-mainnet','0x'+'22'*20,None,'02'*32)))
 
  def test_default_factories_hydrate_aster_and_hyperliquid_without_private_io(self):
@@ -64,7 +65,7 @@ class IntegrationTests(unittest.TestCase):
     return AsterInstrument(metadata(),'2000'),Book(dict(bids=[dict(price='1999.99',remaining_base_amount='2')],asks=[dict(price='2000.01',remaining_base_amount='2')]),time.time()),{}
    with patch.object(AsterPublicAdapter,'snapshot',side_effect=sample):
     market,book,source=public_snapshot(spec)
-    self.assertEqual((market.symbol,market.base_asset,market.market_id,market.raw['symbol']),('ETH','ETH',1,'ETHUSDT'))
+    self.assertEqual((market.symbol,market.base_asset,market.market_id,market.raw['symbol']),('ETH','ETH',local_market_id('ETHUSDT'),'ETHUSDT'))
 
 class AsterWorkerTests(unittest.IsolatedAsyncioTestCase):
  async def test_shared_worker_keeps_aster_usdt_fees_separate_and_repeat_idempotent(self):

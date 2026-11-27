@@ -43,7 +43,8 @@ python3 -m funding_collector serve --store local_runs/ui-paper --host 127.0.0.1 
 - Прежний paper UI (`funding_collector serve`): public market data и synthetic исполнение. Новый отдельный `funding_collector.live_web` предоставляет явно вооружаемый браузерный LIVE-путь; он описан выше.
 - Отдельный локальный терминальный `live`-контур: Core, RH, native Hyperliquid, Entropy, Extended и Aster. Проверен офлайн с dummy-ключами и подменёнными транспортами; это **не допуск к реальным средствам**.
 - Режим: полный набор primary LIMIT → один opposite protected IOC по подтверждённому base quantity → сверка fills и остатка. IOC не гарантирует полный fill. Автоматических повторных hedge/flatten нет.
-- Entropy: отдельные identity/agent credentials; reviewed private pair только `io:NVDA` против Core/RH `NVDA`. Не любые рынки HIP-3.
+- LIVE: списки инструментов автоматически читаются при открытии формы и выборе биржи для Hyperliquid native, Entropy io, Lighter Core/RH, Aster и Extended. Тикерного allowlist нет; каждая нога проверяется по свежим metadata, ID, единицам, активности, шагам и минимумам. Экономическое соответствие двух независимо выбранных контрактов определяет оператор, не совпадение тикеров или количества.
+- Entropy: отдельные identity/agent credentials, только собственный namespace `io`, не произвольные HIP-3. Контрактная единица не объявляется эквивалентной spot-акции. Автоматические циклы/закрытие доступны только native HL и Lighter Core/RH; остальные подключённые площадки — однократный явно разрешённый набор.
 - Extended: явный `fee_rate_cap` в public config; комиссии USD отдельно от USDC. Зависимости `requirements-extended.lock` устанавливаются в отдельное окружение; основная native/Core среда не содержит всех Extended SDK.
 - EVEDEX **отложен**. Public/paper сохранены, экспериментальный Node private bridge не интегрирован в общий Python worker и не считается готовым торговым подключением.
 - Перед реальным использованием нужны независимый security review, отдельно разрешённый read-only account-check и отдельное согласование минимальных торговых тестов. `live unlock` может отправить реальные ордера после локального ARM.
@@ -61,7 +62,7 @@ python3 -m funding_collector serve --store local_runs/ui-paper --host 127.0.0.1 
 
 ## Aster Futures V3
 
-В UI/CLI площадка `aster` использует точные символы `BTCUSDT`, `ETHUSDT`, `SOLUSDT`;
+В UI/CLI площадка `aster` использует точные wire-символы активных USDT perpetual из exchangeInfo (например `DOGEUSDT`), без списка разрешённых тикеров;
 публичный стакан и mark price читаются без ключей. Paper fills остаются синтетическими.
 Variational не добавлен в новый public/paper/private путь: наличие legacy adapter
 не означает готовую интеграцию.
@@ -75,8 +76,7 @@ signer child, factory и общий worker. Установите `requirements-l
 Отличия Aster в публичной конфигурации из [LOCAL_TEST_WALLET.md](LOCAL_TEST_WALLET.md):
 - deployment: `aster-mainnet`; `account` — owner/account address, `signer` — адрес
   **отдельного** зарегистрированного agent signer, `api_key_index: null`;
-- private `symbol`: `BTC`, `ETH` или `SOL`; локальные reviewed `asset_id`: 0, 1, 2
-  соответственно — **не биржевые asset IDs**; wire-symbol сохраняется отдельно;
+- private `symbol`: точный `baseAsset`; `asset_id` — версионированный SHA-256 digest точного wire-symbol, **не биржевой asset index**. Широкий ID передаётся браузером как каноническая десятичная строка; старые ordinal IDs 0/1/2 требуют пересоздания конфигурации и отклоняются проверкой свежего scope. Wire-symbol сохраняется отдельно;
 - секрет — private key только dedicated agent, не основного кошелька; ввод только
   в masked terminal prompt. Agent permissions на бирже могут быть шире локальных;
 - нужен уже настроенный one-way mode и разрешённый `canTrade`. `registration()`

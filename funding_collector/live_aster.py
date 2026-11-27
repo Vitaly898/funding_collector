@@ -8,7 +8,7 @@ seam: it receives the final signed wire, never a key or a signing callback.
 import asyncio
 import re
 import time
-from .aster import AsterInstrument, BASE_URL, REVIEWED
+from .aster import AsterInstrument, BASE_URL, local_market_id
 from .domain import Reject, number
 from .live import DEPLOYMENTS, OrderLedger
 
@@ -48,10 +48,10 @@ class AsterPrivate:
                     or DEPLOYMENTS[identity.deployment] != (BASE_URL, 1666)
                     or _binding(identity.deployment, identity.account, identity.api_key_index, secret) != identity
                     or not isinstance(market, AsterInstrument)
-                    or market.raw.get('symbol') not in REVIEWED
+
                     or market.symbol != market.base_asset
                     or market.symbol + 'USDT' != market.raw['symbol']
-                    or market.market_id != REVIEWED[market.raw['symbol']]
+                    or market.market_id != local_market_id(market.raw['symbol'])
                     or market.multiplier != 1 or market.quantity_unit != 'base'
                     or market.quote_asset != 'USD'
                     or identity.account.lower() == identity.signer.lower()

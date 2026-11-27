@@ -25,8 +25,8 @@ npm test --prefix optional/evedex
 
 - `version`: целое `1`;
 - `lifetime`: целое 1..900 секунд; `poll_seconds`: 0.1..60;
-- `legs`: ровно две ноги, primary первой, hedge второй, одна `hyperliquid-mainnet-native`, другая `lighter-core-mainnet`, одинаковый точный `symbol` (`BTC`, `ETH` или `SOL`);
-- каждая нога: `identity`, `symbol`, целое публичное `asset_id`, строковые положительные `max_quantity`, `max_notional`, `max_slippage_bps` (не выше 100);
+- `legs`: ровно две ноги разных поддерживаемых deployments, primary первой, hedge второй. Для описанного здесь native/Core сценария `symbol` каждой ноги выбирается независимо из свежих metadata без ticker allowlist; экономическое соответствие — ответственность оператора;
+- каждая нога: `identity`, `symbol`, публичное `asset_id` (целое или каноническая десятичная строка для широких IDs), строковые положительные `max_quantity`, `max_notional`, `max_slippage_bps` (не выше 100). Extended дополнительно требует явный `fee_rate_cap`;
 - `identity`: ровно `deployment`, `account`, `signer`, `api_key_index`. Native: адрес отдельного аккаунта, адрес его dedicated agent, `api_key_index: null`. Core: строковый canonical account index, fingerprint execution key в формате реализации `_binding`, целый зарегистрированный index 4..254. Fingerprint — не сам ключ. Привязка проверяется локально до инициализации SDK. Не вычисляйте fingerprint, передавая ключ в argv/env/чат;
 - `intent`: ровно строковые `id`, `quantity`, `side`, `primary_price`, `hedge_price`, `primary_reference`, `hedge_reference`; `side` — `buy` или `sell`, id — 1..80 символов `A-Z a-z 0-9 _ -`.
 

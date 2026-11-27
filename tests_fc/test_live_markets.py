@@ -81,7 +81,7 @@ def test_catalog_resolves_dynamic_ids_and_both_primary_directions(tmp_path):
     for bad in ['NaN','-1','101']:
         with pytest.raises(Reject):d.quote(HL,CORE,'ETH',offset_pct=bad)
 
-@pytest.mark.parametrize('pair',[(HL,HL),(HL,ENT),(CORE,RH),('evil',CORE)])
+@pytest.mark.parametrize('pair',[(HL,HL),(CORE,CORE),('evil',CORE)])
 def test_unsupported_deployments_fail_before_transport(tmp_path,pair):
     from funding_collector.live_markets import MarketDirectory
     d=MarketDirectory(tmp_path,factory=lambda *a:pytest.fail('unexpected public read'))

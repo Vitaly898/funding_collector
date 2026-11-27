@@ -23,7 +23,7 @@ def test_directory_reads_only_selected_venue(tmp_path, deployment):
     assert result['markets'][0]['supported']
     assert 'pairs' not in result
 
-@pytest.mark.parametrize('deployment', ['evil', 'hyperliquid-mainnet-io', 'extended-mainnet-starknet'])
+@pytest.mark.parametrize('deployment', ['evil', 'hyperliquid-mainnet-io', 'variational-mainnet', 'evedex-mainnet'])
 def test_directory_rejects_unknown_scope_before_transport(tmp_path, deployment):
     def forbidden(*args):
         pytest.fail('unexpected public read')

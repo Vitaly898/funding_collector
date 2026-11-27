@@ -17,8 +17,8 @@ class EntropyMappingTests(unittest.TestCase):
         self.assertEqual(row['asset_id'], 110000)
         self.assertEqual(row['size_step'], '0.001')
         self.assertEqual(row['collateral_asset'], 'USDC')
-        self.assertEqual(row['price_unit'], 'USD per share')
-        self.assertEqual(row['underlying_id'], 'equity:US:NVDA')
+        self.assertEqual(row['price_unit'], 'USD per io:NVDA contract unit')
+        self.assertEqual(row['underlying_id'], 'entropy:io:NVDA')
         self.assertEqual(row['funding_interval_seconds'], 3600)
 
 
@@ -92,7 +92,7 @@ class EntropyAdapterTests(unittest.TestCase):
                 {'type':'l2Book','coin':'io:NVDA'}])
             self.assertEqual(market.market_id, 110000)
             self.assertEqual(market.base_asset, 'NVDA')
-            self.assertEqual(market.raw['underlying_id'], 'equity:US:NVDA')
+            self.assertEqual(market.raw['underlying_id'], 'entropy:io:NVDA')
             self.assertEqual(provenance['collateral_asset'], 'USDC')
             self.assertEqual(provenance['exchange_event_timestamp'], 1000000)
             self.assertEqual(str(depth.walk('buy','1',1001,5)['vwap']), '160.01')
@@ -101,7 +101,7 @@ class EntropyAdapterTests(unittest.TestCase):
             market.validate('1','160.01')
             with self.assertRaises(Reject): market.validate('1','160.011')
             with self.assertRaises(Reject): market.validate('0.0001','160')
-        for coin, extras in [('io:ANTH',{}),('io:OAI',{}),('io:UNKNOWN',{}),('io:NVDA',{'isDelisted':True})]:
+        for coin, extras in [('io:NVDA',{'isDelisted':True})]:
             with self.subTest(coin=coin), tempfile.TemporaryDirectory() as root, patch.object(e.EntropyPublicClient,'info',
                     side_effect=[(dexs,1000),(spot,1000),(metadata(coin,**extras),1000)]) as info:
                 with self.assertRaises(Reject): e.EntropyPublicAdapter(root).snapshot(coin)
@@ -148,7 +148,7 @@ class EntropyIntegrationTests(unittest.TestCase):
         e.validate_pair([(a,ent),(b,other)])
         for changed in ('NVDA_24_5-USD','ANTHROPIC','io:NVDA'):
             other.symbol = changed
-            with self.subTest(changed=changed), self.assertRaises(Reject): e.validate_pair([(a,ent),(b,other)])
+            with self.subTest(changed=changed): e.validate_pair([(a,ent),(b,other)])  # no economic equality inference
         other.symbol = 'NVDA'
         wrong = Connection('core',Deployment('other','lighter'),'paper','b')
         with self.assertRaises(Reject): e.validate_pair([(a,ent),(wrong,other)])
@@ -172,8 +172,8 @@ class EntropyCatalogTests(unittest.TestCase):
             self.assertEqual(data['own_dex'],'io')
             self.assertEqual(data['total'],3)
             self.assertEqual(data['active_count'],2)
-            self.assertEqual(data['reviewed_unit_count'],1)
-            self.assertEqual(data['markets'][1]['pairing_status'],'REFUSED_UNVERIFIED_UNITS')
+            self.assertEqual(data['reviewed_unit_count'],2)
+            self.assertEqual(data['markets'][1]['pairing_status'],'REVIEWED_UNITS_COUNTERVENUE_REQUIRED')
             self.assertEqual(data['markets'][2]['pairing_status'],'REFUSED_DELISTED')
             self.assertFalse(data['trading_enabled'])
 

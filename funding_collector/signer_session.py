@@ -38,6 +38,13 @@ class SessionSpec:
     allow_close: bool = False
 
     def __post_init__(self):
+        asset=self.asset_id
+        if isinstance(asset,str):
+            import re
+            if not re.fullmatch(r'0|[1-9][0-9]{0,77}',asset):raise Reject('canonical bounded metadata asset ID required')
+            asset=int(asset)
+        if type(asset) is not int or not 0<=asset<2**256:raise Reject('typed bounded metadata asset ID required')
+        object.__setattr__(self,'asset_id',asset)
         if self.identity.deployment=='extended-mainnet-starknet':
             if self.fee_rate_cap is None or not 0<=number(self.fee_rate_cap)<=1:
                 raise Reject('Extended requires explicit fractional fee rate cap')

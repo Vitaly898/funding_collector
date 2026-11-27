@@ -85,10 +85,11 @@ async function logoutAndRefresh(client,onFailure){
  try{await client.logout();await client.bootstrap();}
  catch(error){if(error.message!=='STALE'&&!client.authenticated)onFailure();}
 }
-function buildSimpleConfig(common,identities,quote){
+function buildSimpleConfig(common,identities,quote,feeCaps=[]){
  if(!quote||!Number.isFinite(quote.observed_at)||Date.now()/1000-quote.observed_at<0||Date.now()/1000-quote.observed_at>quote.max_age_seconds)throw Error('STALE_QUOTE');
  if(!Array.isArray(quote.legs)||quote.legs.length!==2)throw Error('INVALID_PAIR');
  const legs=quote.legs.map((leg,n)=>({identity:identities[n],symbol:leg.symbol,asset_id:leg.asset_id,max_quantity:common.quantity,max_notional:common.max_notional,max_slippage_bps:common.max_slippage_bps}));
+ legs.forEach((leg,n)=>{if(leg.identity.deployment==='extended-mainnet-starknet')leg.fee_rate_cap=feeCaps[n];});
  return {version:1,legs,intent:{id:common.id,quantity:common.quantity,side:common.side,primary_price:quote.legs[0].price,hedge_price:quote.legs[1].price,primary_reference:quote.legs[0].reference,hedge_reference:quote.legs[1].reference},lifetime:Number(common.lifetime),poll_seconds:Number(common.poll_seconds)};
 }
 function buildFarmingPolicy(data,deployments){
@@ -117,7 +118,7 @@ function gate(auth){
  if(!auth){$('strategy-modal').close();$('strategy-list').replaceChildren();cardsSignature='';$('strategy-detail').hidden=true;$('strategies').hidden=false;invalidate(true);$('ledger').replaceChildren();$('raw-state').textContent='';$('accounts').replaceChildren();$('summary').textContent='Исполнение заблокировано';$('message').textContent='';}
 }
 const client=createClient({onAuth:gate});
-const venues=[['hyperliquid-mainnet-native','Hyperliquid · native'],['lighter-core-mainnet','Lighter · Core'],['lighter-rh-mainnet','Lighter · RH'],['entropy-mainnet-io','Entropy · io']];
+const venues=[['hyperliquid-mainnet-native','Hyperliquid · native'],['lighter-core-mainnet','Lighter · Core'],['lighter-rh-mainnet','Lighter · RH'],['entropy-mainnet-io','Entropy · io'],['aster-mainnet','Aster · Futures V3'],['extended-mainnet-starknet','Extended · Starknet']];
 const fields=[['account','Адрес аккаунта'],['signer','Публичный ключ торгового подписанта'],['api_key_index','Номер API-ключа · только Lighter']];
 function input(label,name,{password=false,required=true,value=''}={}){
  const wrap=document.createElement('label');wrap.textContent=label;
@@ -163,13 +164,17 @@ for(let n=0;n<2;n++){
  select.value=n?'lighter-core-mainnet':'hyperliquid-mainnet-native';
  const title=document.createElement('p');title.className='connection-venue';box.append(title);
  fields.forEach(([name,label])=>box.append(input(label,name,{required:name!=='api_key_index'})));
+ box.append(input('Лимит комиссии Extended · доля, например 0.0005','fee_rate_cap',{required:false}));
  const setup=$('setup-'+n);
  setup.append(input('Выделенный торговый ключ · не ключ основного кошелька','secret',{password:true}));
+ for(const [name,label,password] of [['api_key','API-ключ Extended',true],['stark_private_key','Закрытый Stark-ключ Extended',true],['stark_public_key','Публичный Stark-ключ Extended',false],['vault','Номер vault Extended · точное целое',false]])setup.append(input(label,name,{password}));
  setup.append(input('Новый пароль шифрования ключа · минимум 16 символов','passphrase',{password:true}));
  const button=document.createElement('button');button.type='submit';button.textContent='Зашифровать ключ';setup.append(button);
  function conditional(){
   title.textContent=select.selectedOptions[0].textContent;
-  box.querySelector('[name=api_key_index]').parentElement.hidden=!select.value.startsWith('lighter-');
+  const extended=select.value==='extended-mainnet-starknet';
+  for(const [name,visible] of [['api_key_index',select.value.startsWith('lighter-')],['fee_rate_cap',extended]]){const el=box.querySelector('[name='+name+']');el.parentElement.hidden=!visible;el.disabled=!visible;el.required=visible;}
+  for(const name of ['api_key','stark_private_key','stark_public_key','vault','secret']){const el=setup.querySelector('[name='+name+']'),visible=name==='secret'?!extended:extended;el.parentElement.hidden=!visible;el.disabled=!visible;el.required=visible;}
   clearSecrets();
  }
  select.addEventListener('change',()=>{conditional();farmingAvailability();if(client.authenticated&&$('strategy-modal').open)loadLeg(n);else invalidate(true);});conditional();
@@ -280,14 +285,16 @@ $('config').addEventListener('submit',event=>{
  const identities=[0,1].map(n=>{const box=$('leg-'+n),deployment=$(n?'hedge-deployment':'primary-deployment').value;return {deployment,account:box.querySelector('[name=account]').value,signer:box.querySelector('[name=signer]').value,api_key_index:deployment.startsWith('lighter-')?safeInteger(box.querySelector('[name=api_key_index]').value):null};});
  common.id=(common.label?common.label+'-':'dn-')+root.crypto.randomUUID();
  common.max_notional=$('max-notional').value;common.max_slippage_bps=$('max-slippage').value;common.lifetime=$('lifetime').value;common.poll_seconds=$('poll-seconds').value;
- const config=buildSimpleConfig(common,identities,quoteData),farming=buildFarmingPolicy(common,identities.map(i=>i.deployment));
+ const feeCaps=[0,1].map(n=>$('leg-'+n).querySelector('[name=fee_rate_cap]').value);
+ const config=buildSimpleConfig(common,identities,quoteData,feeCaps),farming=buildFarmingPolicy(common,identities.map(i=>i.deployment));
  if(farming)config.farming=farming;
  return client.mutate('configure',{config}).then(row=>{$('strategy-modal').close();$('strategies').hidden=false;$('strategy-detail').hidden=true;return row;});
  });
 });
 for(let n=0;n<2;n++)$('setup-'+n).addEventListener('submit',event=>{
  event.preventDefault();const data=take(event.currentTarget);
- action(event.currentTarget,()=>client.mutate('setup',{leg:n,secret:serializeSetupSecret(data,false),passphrase:data.passphrase}));
+ const extended=$(n?'hedge-deployment':'primary-deployment').value==='extended-mainnet-starknet';
+ action(event.currentTarget,()=>client.mutate('setup',{leg:n,secret:serializeSetupSecret(data,extended),passphrase:data.passphrase}));
 });
 for(const name of ['check','start'])$(name).addEventListener('submit',event=>{
  event.preventDefault();const data=take(event.currentTarget),body={passphrases:[data.primary_passphrase,data.hedge_passphrase]};
