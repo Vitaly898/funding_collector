@@ -41,6 +41,11 @@ class LighterPrivateTests(unittest.TestCase):
                 with self.assertRaises(Reject):await b.submit(Order('0x'+'ab'*16,'buy',D('.02'),D('3000'),D('3000'),'LIMIT'))
                 s.tx_api.next_nonce.return_value=NS(nonce=2,code=200)
                 await b.submit(Order('0x'+'cd'*16,'sell',D('.02'),D('2990'),D('3000'),'MARKET'))
+                a.allow_close=True
+                s.tx_api.next_nonce.return_value=NS(nonce=3,code=200)
+                await b.submit(Order('0x'+'ef'*16,'buy',D('.02'),D('3000'),D('3000'),'MARKET',reduce_only=True))
+                self.assertTrue(signed[-1][0]['reduce_only'])
+                self.assertEqual(signed[-1][0]['integrator_account_index'],0)
             k,tx=signed[0]
             self.assertEqual((k['base_amount'],k['price'],k['time_in_force'],k['order_type']),(200,300000,2,0))
             self.assertEqual((k['nonce'],k['api_key_index'],k['integrator_account_index']),(1,4,0))

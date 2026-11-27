@@ -14,11 +14,13 @@ test('simple configuration whitelists real worker fields and hides metadata iden
  assert.ok(!JSON.stringify(c).includes('auto_close'));assert.ok(!JSON.stringify(c).includes('interval'));
  assert.throws(()=>app.buildSimpleConfig(data,identities,{...quote,observed_at:0}),/STALE/);
 });
-test('volume farming is a collapsed disabled placeholder outside execution form',()=>{
+test('volume farming stays collapsed and disabled until explicit opt-in',()=>{
  const html=fs.readFileSync(require('node:path').join(__dirname,'../funding_collector/live_ui/index.html'),'utf8');
  const block=html.match(/<details id="volume-farming"[\s\S]*?<\/details>/)?.[0];
- assert.ok(block,'placeholder exists');assert.ok(!block.split('>')[0].includes('open'));
- assert.match(block,/fieldset disabled/);assert.match(block,/пока недоступно/);
- assert.match(block,/Автозакрытие/);assert.match(block,/Бесконечный цикл/);assert.match(block,/Мин. \/ макс. задержка/);
- assert.ok(!/<(?:input|select)[^>]*\bname=/.test(block));
+ assert.ok(block,'farming section exists');assert.ok(!block.split('>')[0].includes('open'));
+ assert.match(block,/<fieldset id="farming-fields" disabled>/);
+ assert.match(block,/Бесконечный режим не поддерживается/);
+ const opt=block.match(/<input id="farming-enabled"[^>]*>/)[0];
+ assert.ok(!opt.includes('checked'));assert.match(opt,/form="config"/);
+ assert.equal(app.buildFarmingPolicy({},['hyperliquid-mainnet-native','lighter-core-mainnet']),undefined);
 });

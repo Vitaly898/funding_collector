@@ -12,7 +12,7 @@ from funding_collector.web_auth import Sessions
 
 def offline_config(**overrides):
     """Lifecycle doubles retain the public strategy projection contract."""
-    values = dict(lifetime=30, poll_seconds=.01,
+    values = dict(lifetime=30, poll_seconds=.01, farming=None,
                   intent={'id':'offline', 'side':'buy', 'quantity':'0.02'},
                   specs=[SimpleNamespace(identity=SimpleNamespace(deployment=d), symbol='ETH')
                          for d in ('hyperliquid-mainnet-native', 'lighter-core-mainnet')])

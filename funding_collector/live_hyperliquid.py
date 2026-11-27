@@ -76,7 +76,7 @@ class HyperliquidPrivate:
         self.market.validate(order.quantity,order.price)
         request=dict(coin=self.market.symbol,is_buy=order.side=='buy',sz=float(order.quantity),
                      limit_px=float(order.price),order_type={'limit':{'tif':'Alo' if order.kind=='LIMIT' else 'Ioc'}},
-                     reduce_only=False,cloid=Cloid.from_str(order.client_id))
+                     reduce_only=order.reduce_only,cloid=Cloid.from_str(order.client_id))
         wire=order_request_to_order_wire(request,self.market.market_id)
         if number(wire['s'])!=order.quantity or number(wire['p'])!=order.price:
             raise Reject('SDK float conversion changed exact asset units')

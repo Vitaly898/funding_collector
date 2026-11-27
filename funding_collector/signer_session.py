@@ -35,6 +35,7 @@ class SessionSpec:
     journal: str
     artifacts: str
     fee_rate_cap: str | None = None
+    allow_close: bool = False
 
     def __post_init__(self):
         if self.identity.deployment=='extended-mainnet-starknet':
@@ -44,7 +45,7 @@ class SessionSpec:
             raise Reject('fee rate cap only supported for Extended')
 
     def authority(self):
-        return Authority(self.identity,self.symbol,self.asset_id,self.max_quantity,self.max_notional,self.max_slippage_bps)
+        return Authority(self.identity,self.symbol,self.asset_id,self.max_quantity,self.max_notional,self.max_slippage_bps,allow_close=self.allow_close)
 
 
 def _send(conn, value):
@@ -92,6 +93,8 @@ def _child(conn, spec, factory, until, parent_pid, read_only=False):
                         result=await bridge.submit(order)
                         # ACK only, never return arbitrary SDK payload/tx signature/auth.
                         result={k:result[k] for k in ('status','filled_base','order_id','client_order_index') if k in result}
+                    elif method=='close_quote':
+                        result=make_close_quote(bridge,snapshot(),arg)
                     elif method=='registration' and arg is None:
                         await bridge.registration()
                         result=True
@@ -134,6 +137,19 @@ def _child(conn, spec, factory, until, parent_pid, read_only=False):
         try:_send(conn,dict(ok=False))
         except BaseException:pass
     finally:conn.close()
+
+
+def make_close_quote(bridge, snapshot, arg):
+    if not isinstance(arg,dict) or set(arg)!={'side','quantity'} or arg['side'] not in ('buy','sell'):
+        raise Reject('exact close quote required')
+    market,book,_=snapshot
+    quantity=number(arg['quantity'],True)
+    depth=book.walk(arg['side'],quantity,time.time(),3)
+    reference=(book.sides['bids'][0][0]+book.sides['asks'][0][0])/2
+    order=Order('0x'+'00'*16,arg['side'],quantity,depth['worst_price'],reference,'MARKET',reduce_only=True)
+    bridge.authority.check(bridge.identity,market.symbol,market.market_id,order)
+    validate_snapshot(bridge,snapshot,order)
+    return dict(price=str(order.price),reference_price=str(order.reference_price))
 
 
 def validate_snapshot(bridge, snapshot, order):
@@ -228,7 +244,8 @@ class SignerSession:
     async def submit(self,order):
         if not isinstance(order,Order):raise Reject('typed order required')
         self.authority.check(self.identity,self.spec.symbol,self.spec.asset_id,order)
-        return self._rpc('submit',{k:str(v) for k,v in order.__dict__.items()})
+        return self._rpc('submit',{k:v if type(v) is bool else str(v) for k,v in order.__dict__.items()})
+    async def close_quote(self,side,quantity):return self._rpc('close_quote',dict(side=side,quantity=quantity))
     async def positions(self):return self._rpc('positions')
     async def registration(self):return self._rpc('registration')
     async def open_orders(self):return self._rpc('open_orders')

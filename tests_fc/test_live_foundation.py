@@ -58,6 +58,12 @@ class HyperliquidContractTests(unittest.TestCase):
                 self.assertGreater(payload['nonce'],0)
                 with self.assertRaises(Reject):asyncio.run(bridge.submit(Order('0x'+'ab'*16,'buy',D('.02'),D('3000'),D('3000'),'LIMIT')))
                 self.assertEqual(post.call_count,1)
+                a.allow_close=True
+                asyncio.run(bridge.submit(Order('0x'+'cd'*16,'sell',D('.02'),D('3000'),D('3000'),'MARKET',reduce_only=True)))
+                wire=post.call_args.args[1]['action']['orders'][0]
+                self.assertTrue(wire['r'])
+                self.assertEqual(wire['t'],{'limit':{'tif':'Ioc'}})
+                self.assertNotIn('builder',post.call_args.args[1]['action'])
             with patch.object(info,'post',side_effect=[{'assetPositions':[]},[],{'status':'unknownOid'},[]]) as post:
                 self.assertEqual(asyncio.run(bridge.positions()),[])
                 self.assertEqual(asyncio.run(bridge.open_orders()),[])

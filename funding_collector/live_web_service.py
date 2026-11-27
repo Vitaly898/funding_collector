@@ -82,7 +82,15 @@ class LiveService:
             db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
             try:
                 row=db.execute('SELECT data FROM tasks ORDER BY rowid DESC LIMIT 1').fetchone()
-                if row:self._state=self._project(json.loads(row[0]),loaded=True)
+                if row:
+                    opened=json.loads(row[0])
+                    if self._config and self._config.farming:
+                        farm=db.execute('SELECT data FROM farming ORDER BY rowid DESC LIMIT 1').fetchone()
+                        if farm:
+                            farming=json.loads(farm[0])
+                            opened=json.loads(db.execute('SELECT data FROM tasks WHERE id=?',(farming['opening_id'],)).fetchone()[0])
+                            self._state=self._project_farming(opened,farming,loaded=True)
+                    else:self._state=self._project(opened,loaded=True)
             finally:db.close()
 
     @staticmethod
@@ -98,6 +106,25 @@ class LiveService:
             result['observed_at']=s['journal'][-1]['at'] if s['journal'] else None
             result['loaded_at']=time.time()
         else:result['observed_at']=time.time()
+        return result
+
+    @staticmethod
+    def _project_farming(opened,farm,*,loaded=False):
+        from decimal import Decimal
+        from .domain import number
+        result=LiveService._project(opened,loaded=loaded)
+        result.update(intent=dict(farm['intent']),status=farm['status'],phase=farm['phase'],
+                      fees_by_currency=dict(farm['fees_by_currency']),
+                      journal=list(farm['journal']),farming={k:farm[k] for k in
+                        ('cycle','policy','close_fills','hold_deadline','delay_deadline','chosen_delay','turnover_reserved') if k in farm})
+        residual=Decimal(0)
+        for label in ('primary','hedge'):
+            closed=sum((number(f['quantity'],True) for f in farm['close_fills'][label]),Decimal(0))
+            quantity=number(opened[label+'_filled'])-closed
+            sign=(1 if opened['intent']['side']=='buy' else -1)*(1 if label=='primary' else -1)
+            result['analytics'][label].update(quantity=str(quantity),signed_base=str(sign*quantity))
+            residual+=sign*quantity
+        result['residual_base']=str(residual)
         return result
 
     @property
@@ -127,7 +154,7 @@ class LiveService:
             self._ensure_open()
             if self._running or (self._root / 'worker' / 'orders.sqlite3').exists():
                 raise Reject('configuration_locked')
-            if not isinstance(config, dict) or set(config) != {'version','legs','intent','lifetime','poll_seconds'}:
+            if not isinstance(config, dict) or set(config) not in ({'version','legs','intent','lifetime','poll_seconds'}, {'version','legs','intent','lifetime','poll_seconds','farming'}):
                 raise Reject('invalid_config')
             from .supervised import FIELDS, INTENT
             if not isinstance(config['legs'],list) or len(config['legs']) != 2:
@@ -270,7 +297,7 @@ class LiveService:
         handoff=[]
         try:
             if confirmation!=ACK:raise Reject('fresh_confirmation_required')
-            if self._state is not None and self._state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED'):raise Reject('task_locked')
+            if self._state is not None and self._state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED','DONE'):raise Reject('task_locked')
             self._fence(epoch)
             self._halt=threading.Event();ready=threading.Event()
             timer=threading.Timer(self._config.lifetime,lambda:self.stop(_timer=timer))
@@ -304,16 +331,27 @@ class LiveService:
         async def run():
             for s in sessions:await s.registration()
             self._fence(epoch)
-            with Worker(self._root/'worker',*sessions) as worker:
-                worker.add(self._config.intent);worker.arm(ACK,lifetime=self._config.lifetime)
+            worker_type=Worker
+            if self._config.farming:
+                from .farming import FarmingWorker
+                worker_type=FarmingWorker
+            with worker_type(self._root/'worker',*sessions) as worker:
+                if self._config.farming: worker.add_farming(self._config.intent,self._config.farming)
+                else: worker.add(self._config.intent)
+                worker.arm(ACK,lifetime=self._config.lifetime)
                 try:
                     while not self._halt.is_set():
                         self._fence(epoch)
                         if not all(s.alive for s in sessions):raise Reject('signer_expired')
-                        state=await worker.tick(self._config.intent['id'])
-                        with self._meta:self._state=self._project(state)
+                        if self._config.farming:
+                            state=await worker.tick_farming(self._config.intent['id'])
+                            projected=self._project_farming(worker.state(state['opening_id']),state)
+                        else:
+                            state=await worker.tick(self._config.intent['id'])
+                            projected=self._project(state)
+                        with self._meta:self._state=projected
                         ready.set()
-                        if state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED'):break
+                        if state['status'] in ('UNKNOWN','ATTENTION','COMPLETED_CONFIRMED','DONE'):break
                         await asyncio.to_thread(self._halt.wait,self._config.poll_seconds)
                 finally:worker.armed=False
         try:
@@ -348,7 +386,7 @@ class LiveService:
                         vaults=[dict(configured=(self._root / f'vault-{n}' / 'key.json').is_file()) for n in range(2)],
                         running=self._running, trading_enabled=self._enabled,
                         checked=self._checked, state=self._state, warning=WARNING,
-                        last_error=self._error)
+                        last_error=self._error, farming=dict(configured=bool(self._config and self._config.farming),policy=self._config.farming if self._config else None, infinite_supported=False, supported_deployments=['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet']))
 
     def stop(self,*,_timer=None):
         with self._meta:

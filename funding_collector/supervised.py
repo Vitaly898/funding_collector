@@ -31,24 +31,30 @@ class Config:
     intent: dict
     lifetime: int
     poll_seconds: float
+    farming: dict | None = None
 
 
 def load_config(path, root):
     raw=Path(path).read_bytes()
     if len(raw)>16384:raise Reject('oversized public config')
     c=json.loads(raw)
-    if not isinstance(c,dict) or set(c)!={'version','legs','intent','lifetime','poll_seconds'} or c['version']!=1:
+    if not isinstance(c,dict) or set(c) not in ({'version','legs','intent','lifetime','poll_seconds'}, {'version','legs','intent','lifetime','poll_seconds','farming'}) or c['version']!=1:
         raise Reject('exact versioned public config required')
     if type(c['lifetime']) is not int or not 1<=c['lifetime']<=900:raise Reject('bounded unlock required')
     if type(c['poll_seconds']) not in (float,int) or not 0.1<=c['poll_seconds']<=60:raise Reject('bounded polling required')
     if not isinstance(c['legs'],list) or len(c['legs'])!=2:raise Reject('two scoped legs required')
+    farming=None
+    if 'farming' in c:
+        from .farming import validate_policy, SUPPORTED
+        farming=validate_policy(c['farming'])
     specs=[]
     for n,leg in enumerate(c['legs']):
         if not isinstance(leg,dict):raise Reject('exact public leg fields required')
         extended=leg.get('identity',{}).get('deployment')=='extended-mainnet-starknet'
         if set(leg)!=(FIELDS|{'fee_rate_cap'} if extended else FIELDS):raise Reject('exact public leg fields required')
         spec=SessionSpec(**dict(leg,identity=Identity(**leg['identity']),
-            journal=str(Path(root)/f'signer-{n}'),artifacts=str(Path(root)/f'public-{n}')))
+            journal=str(Path(root)/f'signer-{n}'),artifacts=str(Path(root)/f'public-{n}'),allow_close=farming is not None))
+        if farming and spec.identity.deployment not in SUPPORTED: raise Reject('farming close unavailable on venue')
         spec.authority()
         specs.append(spec)
     validate_private_pair(*specs)
@@ -61,7 +67,7 @@ def load_config(path, root):
                     i['quantity'],i[label+'_price'],i[label+'_reference'],'LIMIT' if n==0 else 'MARKET')
         a=spec.authority();a.arm('ARM EXACT SCOPED ORDERS',lifetime=1)
         a.check(spec.identity,spec.symbol,spec.asset_id,order);a.lock()
-    return Config(tuple(specs),dict(i),c['lifetime'],float(c['poll_seconds']))
+    return Config(tuple(specs),dict(i),c['lifetime'],float(c['poll_seconds']),farming)
 
 
 def status(root):
@@ -229,6 +235,8 @@ def interactive(args, c, *, reader=None, session_factory=None, checkpoint=None):
     from .keystore import KeyStore
     from .signer_session import ACK
     from .live_worker import Worker
+    if args.live_action=='unlock' and c.farming:
+        raise Reject('farming execution requires browser service; CLI does not support cycles')
     if not sys.stdin.isatty() or not sys.stderr.isatty():raise Reject('local terminal required')
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     # Fail closed rather than letting getpass fall back to echoed stdin.

@@ -67,10 +67,21 @@ function buildSimpleConfig(common,identities,quote){
  const legs=quote.legs.map((leg,n)=>({identity:identities[n],symbol:leg.symbol,asset_id:leg.asset_id,max_quantity:common.quantity,max_notional:common.max_notional,max_slippage_bps:common.max_slippage_bps}));
  return {version:1,legs,intent:{id:common.id,quantity:common.quantity,side:common.side,primary_price:quote.legs[0].price,hedge_price:quote.legs[1].price,primary_reference:quote.legs[0].reference,hedge_reference:quote.legs[1].reference},lifetime:Number(common.lifetime),poll_seconds:Number(common.poll_seconds)};
 }
-function statusText(value){return ({NEW:'Готова к запуску',RUNNING:'Исполняется',UNKNOWN:'Результат неизвестен — нужна сверка',ATTENTION:'Требуется ручная сверка',COMPLETED_CONFIRMED:'Исполнено',CONFIGURED:'Настроена'})[value]||'Ожидает запуска';}
+function buildFarmingPolicy(data,deployments){
+ if(data.farming_enabled!=='on')return undefined;
+ if(!deployments.every(v=>['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet'].includes(v)))throw Error('UNSUPPORTED_FARMING');
+ const p={};
+ for(const [key,lo,hi] of [['hold_seconds',60,86400],['min_delay_seconds',1,86400],['max_delay_seconds',1,86400],['max_cycles',1,10]]){
+  p[key]=safeInteger(data[key]);if(p[key]<lo||p[key]>hi)throw Error('INVALID_FARMING_BOUND');
+ }
+ if(p.min_delay_seconds>p.max_delay_seconds)throw Error('INVALID_FARMING_DELAY');
+ for(const key of ['max_turnover','max_fees']){if(typeof data[key]!=='string'||! /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(data[key])||!Number.isFinite(Number(data[key]))||Number(data[key])<=0)throw Error('INVALID_FARMING_BUDGET');p[key]=data[key];}
+ return p;
+}
+function statusText(value){return ({DONE:'Циклы завершены · обе ноги закрыты',NEW:'Готова к запуску',RUNNING:'Исполняется',UNKNOWN:'Результат неизвестен — нужна сверка',ATTENTION:'Требуется ручная сверка',COMPLETED_CONFIRMED:'Исполнено',CONFIGURED:'Настроена'})[value]||'Ожидает запуска';}
 function strategyName(id){const name=String(id||'').replace(/-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,'');return !name||name==='dn'?'Ручная стратегия':name;}
-function eventText(value){return ({created:'Стратегия сохранена',reconciled_flat_baseline:'Проверены позиции и открытые заявки',reconciled_before_hedge:'Первый объём подтверждён; проверена вторая биржа',write_ahead_primary:'Подготовлена заявка на первой бирже',write_ahead_hedge:'Подготовлена встречная заявка на второй бирже',primary_ack_not_fill:'Первая биржа ответила на заявку — это ещё не сделка',hedge_ack_not_fill:'Вторая биржа ответила на заявку — это ещё не сделка',primary_confirmed_trades:'Подтверждены сделки на первой бирже',hedge_confirmed_trades:'Подтверждены сделки на второй бирже',unknown_primary:'Результат первой заявки неизвестен; повтор запрещён',unknown_hedge:'Результат второй заявки неизвестен; повтор запрещён',failure_requires_attention:'Исполнение остановлено: нужна ручная сверка',completed_confirmed_positions_remain_open:'Обе ноги исполнены; позиции остаются открытыми'})[value]||'Состояние обновлено';}
-if(typeof module!=='undefined'&&module.exports)module.exports={createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig,statusText,eventText,strategyName};
+function eventText(value){return ({farming_created:'Созданы ограниченные автоматические циклы',opening_turnover_reserved:'Учтён лимит оборота открытия',both_legs_hedged_hold_started:'Обе ноги подтверждены; начался отсчёт удержания',write_ahead_close_primary:'Подготовлено reduce-only закрытие первой ноги',write_ahead_close_hedge:'Подготовлено reduce-only закрытие второй ноги',close_primary_ack_not_fill:'Ответ на закрытие первой ноги — это ещё не сделка',close_hedge_ack_not_fill:'Ответ на закрытие второй ноги — это ещё не сделка',close_primary_confirmed_trades:'Подтверждены сделки закрытия первой ноги',close_hedge_confirmed_trades:'Подтверждены сделки закрытия второй ноги',both_legs_confirmed_flat_done:'Обе ноги закрыты; циклы завершены',flat_random_delay_persisted:'Обе ноги закрыты; сохранена задержка перед следующим циклом',next_bounded_cycle:'Начат следующий ограниченный цикл',farming_requires_attention:'Циклы остановлены; нужна ручная сверка позиций и заявок',created:'Стратегия сохранена',reconciled_flat_baseline:'Проверены позиции и открытые заявки',reconciled_before_hedge:'Первый объём подтверждён; проверена вторая биржа',write_ahead_primary:'Подготовлена заявка на первой бирже',write_ahead_hedge:'Подготовлена встречная заявка на второй бирже',primary_ack_not_fill:'Первая биржа ответила на заявку — это ещё не сделка',hedge_ack_not_fill:'Вторая биржа ответила на заявку — это ещё не сделка',primary_confirmed_trades:'Подтверждены сделки на первой бирже',hedge_confirmed_trades:'Подтверждены сделки на второй бирже',unknown_primary:'Результат первой заявки неизвестен; повтор запрещён',unknown_hedge:'Результат второй заявки неизвестен; повтор запрещён',failure_requires_attention:'Исполнение остановлено: нужна ручная сверка',completed_confirmed_positions_remain_open:'Обе ноги исполнены; позиции остаются открытыми'})[value]||'Состояние обновлено';}
+if(typeof module!=='undefined'&&module.exports)module.exports={createClient,serializeSetupSecret,serializeLeg,logoutAndRefresh,buildSimpleConfig,buildFarmingPolicy,statusText,eventText,strategyName};
 if(typeof document==='undefined')return;
 const $=id=>document.getElementById(id);
 const sensitive=()=>document.querySelectorAll('input[type=password]');
@@ -95,6 +106,13 @@ function invalidate(markets=false){
  marketGeneration++;quoteData=null;$('save-config').disabled=true;$('quote-status').textContent='Цена ещё не рассчитана.';
  if(markets){marketRows=[[],[]];for(let n=0;n<2;n++){$('pair-select-'+n).replaceChildren(new Option('Загрузите рынки',''));$('instrument-'+n).textContent='Инструмент не выбран.';}$('market-status').textContent='Выбор бирж изменён. Обновите рынки.';}
 }
+function farmingAvailability(){
+ const supported=[$('primary-deployment').value,$('hedge-deployment').value].every(v=>['hyperliquid-mainnet-native','lighter-core-mainnet','lighter-rh-mainnet'].includes(v));
+ const opt=$('farming-enabled');opt.disabled=!supported;if(!supported)opt.checked=false;
+ $('farming-fields').disabled=!supported||!opt.checked;
+ $('farming-capability').textContent=supported?'Опционально: открытие → удержание после хеджа → reduce-only закрытие → обе ноги без позиции → задержка → следующий цикл.':'Для этой пары автоматические циклы недоступны. Ручное открытие не меняется.';
+}
+$('farming-enabled').addEventListener('change',farmingAvailability);
 const deploymentPair=()=>({primary:$('primary-deployment').value,hedge:$('hedge-deployment').value});
 function instrumentSummary(n){const row=marketRows[n].find(r=>r.symbol===$('pair-select-'+n).value);$('instrument-'+n).textContent=row?row.label+' · базовый актив '+row.base+' · '+row.units:'Инструмент не выбран.';}
 function pairOptions(n){
@@ -123,8 +141,9 @@ for(let n=0;n<2;n++){
   box.querySelector('[name=api_key_index]').parentElement.hidden=!select.value.startsWith('lighter-');
   invalidate(true);clearSecrets();
  }
- select.addEventListener('change',conditional);conditional();
+ select.addEventListener('change',()=>{conditional();farmingAvailability();});conditional();
 }
+farmingAvailability();
 function values(form){return Object.fromEntries(new FormData(form));}
 function take(form){const data=values(form);form.querySelectorAll('input[type=password]').forEach(el=>el.value='');return data;}
 function textTable(headers,rows){
@@ -161,6 +180,15 @@ function render(row){
  if(!s){out.textContent='Нет сохранённой задачи. Здесь появятся подтверждённые сделки, комиссии и журнал.';return;}
  const title=document.createElement('h3');title.textContent=strategyName(s.intent?.id)+' · '+statusText(s.status);out.append(title);
  const p=document.createElement('p');p.textContent='Исполнено на первой: '+s.primary_filled+' · на второй: '+s.hedge_filled+' · Незахеджированный остаток '+s.residual_base+' · Комиссии '+Object.entries(s.fees_by_currency||{}).map(([k,v])=>v+' '+k).join(', ');out.append(p);
+ if(s.farming){
+  const f=s.farming,info=document.createElement('p');info.id='farming-progress';
+  const phases={OPENING:'Открытие',HOLDING:'Удержание',CLOSING_PRIMARY:'Закрытие первой ноги',CLOSING_HEDGE:'Закрытие второй ноги',DELAY:'Пауза между циклами',DONE:'Обе ноги закрыты'};
+  info.textContent='Автоматические циклы · '+(phases[s.phase]||'Нужна сверка')+' · Цикл '+f.cycle+' / '+f.policy.max_cycles+' · Резерв оборота '+f.turnover_reserved+' / '+f.policy.max_turnover;
+  const deadline=s.phase==='HOLDING'?f.hold_deadline:s.phase==='DELAY'?f.delay_deadline:null;
+  if(deadline!=null)info.textContent+=' · Сохранённый срок: '+new Date(deadline*1000).toLocaleString('ru-RU');out.append(info);
+  const closes=Object.entries(f.close_fills||{}).flatMap(([leg,rows])=>rows.map(r=>[leg==='primary'?'Первая биржа':'Вторая биржа',r.quantity,r.price,r.fee+' '+r.fee_currency]));
+  if(closes.length){const h=document.createElement('h3');h.textContent='Подтверждённые сделки закрытия';out.append(h,textTable(['Биржа','Количество','Цена','Комиссия'],closes));}
+ }
  const stamp=document.createElement('p');stamp.className='muted';stamp.textContent='Сохранённое наблюдение: '+(s.observed_at==null?'время неизвестно':new Date(s.observed_at*1000).toLocaleString('ru-RU'))+'. Это не текущая связь с биржей.';out.append(stamp);
  const analytics=document.createElement('div');analytics.className='pair';
  for(const label of ['primary','hedge']){
@@ -229,7 +257,9 @@ $('config').addEventListener('submit',event=>{
  const identities=[0,1].map(n=>{const box=$('leg-'+n),deployment=$(n?'hedge-deployment':'primary-deployment').value;return {deployment,account:box.querySelector('[name=account]').value,signer:box.querySelector('[name=signer]').value,api_key_index:deployment.startsWith('lighter-')?safeInteger(box.querySelector('[name=api_key_index]').value):null};});
  common.id=(common.label?common.label+'-':'dn-')+root.crypto.randomUUID();
  common.max_notional=$('max-notional').value;common.max_slippage_bps=$('max-slippage').value;common.lifetime=$('lifetime').value;common.poll_seconds=$('poll-seconds').value;
- return client.mutate('configure',{config:buildSimpleConfig(common,identities,quoteData)}).then(row=>{$('strategy-modal').close();$('strategies').hidden=false;$('strategy-detail').hidden=true;return row;});
+ const config=buildSimpleConfig(common,identities,quoteData),farming=buildFarmingPolicy(common,identities.map(i=>i.deployment));
+ if(farming)config.farming=farming;
+ return client.mutate('configure',{config}).then(row=>{$('strategy-modal').close();$('strategies').hidden=false;$('strategy-detail').hidden=true;return row;});
  });
 });
 for(let n=0;n<2;n++)$('setup-'+n).addEventListener('submit',event=>{

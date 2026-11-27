@@ -66,3 +66,46 @@ def test_check_and_real_worker_full_primary_before_one_hedge(tmp_path):
         assert len(p.calls)==len(h.calls)==1
         assert not row['trading_enabled']
     finally:service.close()
+
+
+def test_farming_config_opt_in_persists_scoped_authority_and_observation_only_restart(tmp_path):
+    from tests_fc.test_farming import policy
+    c=dict(config(),farming=policy())
+    service=LiveService(tmp_path/'private')
+    try:
+        service.configure(c)
+        assert all(spec.allow_close for spec in service._config.specs)
+        assert service.status()['farming']['policy']==policy()
+    finally:service.close()
+    service=LiveService(tmp_path/'private')
+    try:
+        assert service.status()['farming']['configured']
+    finally:service.close()
+
+
+def test_service_runs_bounded_farming_through_actual_worker(tmp_path,monkeypatch):
+    from tests_fc.test_farming import Venue,policy
+    from tests_fc.test_live_worker import pair
+    from funding_collector.farming import FarmingWorker
+    import funding_collector.farming as module
+    sessions=[];now=[1000]
+    class FarmingSession(Venue):
+        def __init__(self,vault,spec):
+            super().__init__(pair()[len(sessions)%2]);self.vault=vault;self.alive=False;sessions.append(self)
+        def unlock(self,*args,**kwargs):self.alive=True
+        def close(self):self.alive=False;self.authority.lock()
+        async def registration(self):return True
+    monkeypatch.setattr(module,'FarmingWorker',lambda *a,**k:FarmingWorker(*a,clock=lambda:now[0],**k))
+    service=LiveService(tmp_path/'private',session_factory=FarmingSession,public_reader=public_reader)
+    try:
+        service.configure(dict(config(),farming=policy()))
+        for n,key in enumerate(KEYS):service.setup(n,key,PASSWORD)
+        service.start([PASSWORD]*2,'ARM EXACT SCOPED ORDERS')
+        wait_for(lambda:service.status()['state']['phase']=='HOLDING')
+        now[0]=1060
+        wait_for(lambda:not service.status()['running'])
+        row=service.status()['state']
+        assert row['status']=='DONE' and row['farming']['cycle']==1
+        assert len(sessions[-2].calls)==len(sessions[-1].calls)==2
+        assert row['analytics']['primary']['signed_base']=='0.00'
+    finally:service.close()

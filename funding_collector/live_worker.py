@@ -32,7 +32,8 @@ class Worker:
         self.armed=False
         self.scope=[dict(identity=asdict(v.identity),symbol=v.market.symbol,asset_id=v.market.market_id,
                          max_quantity=str(v.authority.max_quantity),max_notional=str(v.authority.max_notional),
-                         max_slippage_bps=str(v.authority.max_slippage_bps)) for v in (primary,hedge)]
+                         max_slippage_bps=str(v.authority.max_slippage_bps),
+                         **({'allow_close':True} if v.authority.allow_close else {})) for v in (primary,hedge)]
 
     def __enter__(self):return self
     def __exit__(self,*args):
